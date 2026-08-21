@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   FileText,
   TrendingUp,
+  Activity,
   Building2,
   Users,
   ListTree,
@@ -27,6 +28,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { label: 'Gerar Balanço', href: '/relatorios/balanco', icon: FileSpreadsheet },
     { label: 'Gerar Balancete', href: '/relatorios/balancete', icon: FileText },
     { label: 'Gerar DRE', href: '/relatorios/dre', icon: TrendingUp },
+    { label: 'Indicadores', href: '/indicadores', icon: Activity },
     { label: 'Cliente', href: '/cadastros/clientes', icon: Building2 },
     { label: 'Contabilistas', href: '/cadastros/contabilistas', icon: Users },
     { label: 'Plano de Contas', href: '/cadastros/contas', icon: ListTree },
@@ -35,7 +37,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <AccountingProvider>
       <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
-        {/* Sidebar */}
         <aside className="w-64 bg-[#0f172a] text-slate-200 flex flex-col justify-between flex-shrink-0 shadow-xl print:hidden">
           <div>
             <div className="p-6 border-b border-slate-800">
@@ -81,7 +82,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </aside>
 
-        {/* Área Principal */}
         <main className="flex-1 overflow-y-auto bg-slate-50">{children}</main>
       </div>
     </AccountingProvider>
