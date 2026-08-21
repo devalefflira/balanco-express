@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { AccountingEngine, BalanceSheetResult } from '@/domain/services/AccountingEngine';
@@ -9,20 +9,20 @@ import { AccountingRepository, SavedPeriodSummary } from '@/infrastructure/repos
 
 export interface CompanyData {
   id?: string;
-  code: string;
+  code?: string;
   corporateName: string;
-  tradeName: string;
+  tradeName?: string;
   cnpj: string;
-  nire: string;
-  nireDate: string;
-  address: string;
-  neighborhood: string;
-  city: string;
-  state: string;
-  zipCode: string;
+  nire?: string;
+  nireDate?: string;
+  address?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
   representativeName: string;
   representativeCpf: string;
-  representativeRole: string;
+  representativeRole?: string;
 }
 
 export interface AccountantData {
@@ -30,15 +30,18 @@ export interface AccountantData {
   name: string;
   crc: string;
   cpf: string;
-  role: string;
+  role?: string;
 }
 
 export interface AccountingPeriodData {
   id?: string;
+  companyId?: string;
+  accountantId?: string;
   description: string;
   startDate: string;
   endDate: string;
-  sourceType?: 'MANUAL' | 'IMPORTED';
+  status: 'OPEN' | 'BALANCED' | 'CLOSED';
+  sourceType: 'MANUAL' | 'IMPORTED';
 }
 
 interface AccountingContextType {
@@ -52,58 +55,68 @@ interface AccountingContextType {
   setPeriod: (period: AccountingPeriodData) => void;
   setCompany: (company: CompanyData) => void;
   setAccountant: (accountant: AccountantData) => void;
-  updateBalance: (codeReduced: number, field: 'initialBalance' | 'debitAmount' | 'creditAmount' | 'finalBalance', value: number) => void;
-  applyAutoBalance: (targetClassification?: string) => void;
+  updateBalance: (codeReduced: number, field: keyof AccountingBalance, value: any) => void;
+  applyAutoBalance: () => void;
   resetBalances: () => void;
-  formatPeriodText: (format?: 'balance' | 'balancete') => string;
-  saveCurrentBalances: (sourceType?: 'MANUAL' | 'IMPORTED') => Promise<string>;
-  importBalancesAndSave: (importedBalances: AccountingBalance[], periodMeta: { description: string; startDate: string; endDate: string }, companyMeta?: any) => Promise<string>;
+  saveCurrentBalances: () => Promise<string>;
+  loadSavedPeriod: (periodId: string) => Promise<void>;
   loadPeriodById: (periodId: string) => Promise<void>;
-  fetchSavedPeriods: () => Promise<void>;
   deleteSavedPeriod: (periodId: string) => Promise<void>;
+  refreshSavedPeriods: () => Promise<void>;
+  formatPeriodText: (startDate?: string, endDate?: string) => string;
+  importBalancesAndSave: (
+    importedBalances: AccountingBalance[],
+    periodInfo: { description: string; startDate: string; endDate: string },
+    companyInfo?: Partial<CompanyData>
+  ) => Promise<string>;
 }
 
 const AccountingContext = createContext<AccountingContextType | undefined>(undefined);
 
+const initialCompany: CompanyData = {
+  code: '00463',
+  corporateName: 'JC MACHADO DIAS',
+  tradeName: 'PRIME DISTRIBUIDORA',
+  cnpj: '24.905.673/0001-59',
+  nire: '21201532287',
+  nireDate: '2016-05-31',
+  address: 'AVENIDA JK, 1208, Lote 1 A 4, Quadra 4 Fundos',
+  neighborhood: 'Vila Santa Luzia',
+  city: 'Bom Jesus das Selvas',
+  state: 'MA',
+  zipCode: '65395-000',
+  representativeName: 'JOSE CARLOS MACHADO DIAS',
+  representativeCpf: '196.018.244-72',
+  representativeRole: 'Administrador',
+};
+
+const initialAccountant: AccountantData = {
+  name: 'JAMAILA FONSECA LOPES COSTA',
+  crc: '0124650',
+  cpf: '024.650.373-40',
+  role: 'Contador',
+};
+
+const initialPeriod: AccountingPeriodData = {
+  description: 'Exercício 01/01/2025 a 31/12/2025',
+  startDate: '2025-01-01',
+  endDate: '2025-12-31',
+  status: 'OPEN',
+  sourceType: 'MANUAL',
+};
+
 export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const repository = new AccountingRepository();
-  const [isLoading, setIsLoading] = useState(false);
+
+  const [company, setCompany] = useState<CompanyData>(initialCompany);
+  const [accountant, setAccountant] = useState<AccountantData>(initialAccountant);
+  const [period, setPeriod] = useState<AccountingPeriodData>(initialPeriod);
   const [savedPeriods, setSavedPeriods] = useState<SavedPeriodSummary[]>([]);
-
-  const [company, setCompany] = useState<CompanyData>({
-    code: '00463',
-    corporateName: 'JC MACHADO DIAS',
-    tradeName: 'PRIME DISTRIBUIDORA',
-    cnpj: '24.905.673/0001-59',
-    nire: '21201532287',
-    nireDate: '2016-05-31',
-    address: 'AVENIDA JK, 1208, Lote 1 A 4, Quadra 4 Fundos',
-    neighborhood: 'Vila Santa Luzia',
-    city: 'Bom Jesus das Selvas',
-    state: 'MA',
-    zipCode: '65395-000',
-    representativeName: 'JOSE CARLOS MACHADO DIAS',
-    representativeCpf: '196.018.244-72',
-    representativeRole: 'Administrador',
-  });
-
-  const [accountant, setAccountant] = useState<AccountantData>({
-    name: 'JAMAILA FONSECA LOPES COSTA',
-    crc: '0124650',
-    cpf: '024.650.373-40',
-    role: 'Contador',
-  });
-
-  const [period, setPeriod] = useState<AccountingPeriodData>({
-    description: 'Exercício 2025',
-    startDate: '2025-01-01',
-    endDate: '2025-12-31',
-    sourceType: 'MANUAL',
-  });
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const [balances, setBalances] = useState<AccountingBalance[]>(() => {
     return DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
-      periodId: 'current-period',
+      periodId: 'initial',
       accountId: String(acc.codeReduced),
       classification: acc.classification,
       description: acc.description,
@@ -119,18 +132,18 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
   });
 
-  const fetchSavedPeriods = async () => {
+  const refreshSavedPeriods = useCallback(async () => {
     try {
       const list = await repository.getSavedPeriods();
       setSavedPeriods(list);
-    } catch (err) {
-      console.error('Erro ao listar períodos:', err);
+    } catch (e) {
+      console.error('Erro ao carregar lista de períodos:', e);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchSavedPeriods();
-  }, []);
+    refreshSavedPeriods();
+  }, [refreshSavedPeriods]);
 
   const recalculateTree = (items: AccountingBalance[]): AccountingBalance[] => {
     const list = items.map((b) => ({ ...b }));
@@ -157,15 +170,27 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         totalCredit += child.creditAmount || 0;
         totalInitial += child.initialBalance || 0;
 
-        // Se a conta analítica possui a mesma natureza da sintética, SOMA; se for contrária (C no Ativo ou D no Passivo), SUBTRAI
         if (syn.statementGroup === 'ATIVO') {
           if (child.finalNature === 'D') {
             totalFinal += child.finalBalance || 0;
           } else {
             totalFinal -= child.finalBalance || 0;
           }
-        } else {
+        } else if (syn.statementGroup === 'PASSIVO' || syn.statementGroup === 'PL') {
           if (child.finalNature === 'C') {
+            totalFinal += child.finalBalance || 0;
+          } else {
+            totalFinal -= child.finalBalance || 0;
+          }
+        } else if (syn.statementGroup === 'RECEITA') {
+          if (child.finalNature === 'C') {
+            totalFinal += child.finalBalance || 0;
+          } else {
+            totalFinal -= child.finalBalance || 0;
+          }
+        } else {
+          // CUSTO e DESPESA
+          if (child.finalNature === 'D') {
             totalFinal += child.finalBalance || 0;
           } else {
             totalFinal -= child.finalBalance || 0;
@@ -179,34 +204,25 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         target.creditAmount = totalCredit;
         target.initialBalance = totalInitial;
         target.finalBalance = Math.abs(totalFinal);
-        target.finalNature = totalFinal < 0 ? (syn.statementGroup === 'ATIVO' ? 'C' : 'D') : (syn.statementGroup === 'ATIVO' ? 'D' : 'C');
+
+        if (syn.statementGroup === 'ATIVO') {
+          target.finalNature = totalFinal < 0 ? 'C' : 'D';
+        } else if (syn.statementGroup === 'PASSIVO' || syn.statementGroup === 'PL' || syn.statementGroup === 'RECEITA') {
+          target.finalNature = totalFinal < 0 ? 'D' : 'C';
+        } else {
+          target.finalNature = totalFinal < 0 ? 'C' : 'D';
+        }
       }
     }
 
     return list;
   };
 
-  const updateBalance = (
-    codeReduced: number,
-    field: 'initialBalance' | 'debitAmount' | 'creditAmount' | 'finalBalance',
-    value: number
-  ) => {
+  const updateBalance = (codeReduced: number, field: keyof AccountingBalance, value: any) => {
     setBalances((prev) => {
       const updated = prev.map((item) => {
         if (item.codeReduced === codeReduced) {
-          const mod = { ...item, [field]: value };
-          if (field !== 'finalBalance') {
-            const res = AccountingEngine.calculateFinalBalance(
-              mod.initialBalance,
-              mod.initialNature,
-              mod.debitAmount,
-              mod.creditAmount,
-              mod.finalNature
-            );
-            mod.finalBalance = res.balance;
-            mod.finalNature = res.nature;
-          }
-          return mod;
+          return { ...item, [field]: value };
         }
         return item;
       });
@@ -214,44 +230,46 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
-  const applyAutoBalance = (targetClassification: string = '2-4-08-01') => {
-    const result = AutoBalancer.autoBalance(balances, targetClassification);
+  const applyAutoBalance = () => {
+    const result = AutoBalancer.autoBalance(balances);
     setBalances(recalculateTree(result.updatedBalances));
   };
 
   const resetBalances = () => {
-    setPeriod({
-      id: undefined,
-      description: 'Novo Exercício',
-      startDate: '2026-01-01',
-      endDate: '2026-12-31',
-      sourceType: 'MANUAL',
-    });
-    setBalances(
-      DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
-        periodId: 'current-period',
-        accountId: String(acc.codeReduced),
-        classification: acc.classification,
-        description: acc.description,
-        codeReduced: acc.codeReduced,
-        statementGroup: acc.statementGroup,
-        accountType: acc.accountType,
-        initialBalance: 0,
-        initialNature: acc.nature,
-        debitAmount: 0,
-        creditAmount: 0,
-        finalBalance: 0,
-        finalNature: acc.nature,
-      }))
-    );
+    const blank = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
+      periodId: 'new',
+      accountId: String(acc.codeReduced),
+      classification: acc.classification,
+      description: acc.description,
+      codeReduced: acc.codeReduced,
+      statementGroup: acc.statementGroup,
+      accountType: acc.accountType,
+      initialBalance: 0,
+      initialNature: acc.nature,
+      debitAmount: 0,
+      creditAmount: 0,
+      finalBalance: 0,
+      finalNature: acc.nature,
+    }));
+    setBalances(blank);
+    setPeriod({ ...initialPeriod, id: undefined });
   };
 
-  const saveCurrentBalances = async (sourceType: 'MANUAL' | 'IMPORTED' = 'MANUAL'): Promise<string> => {
+  const balanceSheet = AccountingEngine.calculateBalanceSheet(balances);
+
+  const formatPeriodText = (startDate?: string, endDate?: string): string => {
+    const start = startDate || period.startDate;
+    const end = endDate || period.endDate;
+    if (!start || !end) return '';
+    const [y1, m1, d1] = start.split('-');
+    const [y2, m2, d2] = end.split('-');
+    return `${d1}/${m1}/${y1} a ${d2}/${m2}/${y2}`;
+  };
+
+  const saveCurrentBalances = async (): Promise<string> => {
     setIsLoading(true);
     try {
-      const balanceSheetRes = AccountingEngine.calculateBalanceSheet(balances);
-
-      const savedId = await repository.savePeriodWithBalances({
+      const targetPeriodId = await repository.savePeriodWithBalances({
         periodId: period.id,
         companyId: company.id,
         accountantId: accountant.id,
@@ -260,99 +278,78 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         description: period.description,
         startDate: period.startDate,
         endDate: period.endDate,
-        isBalanced: balanceSheetRes.isBalanced,
-        sourceType,
+        isBalanced: balanceSheet.isBalanced,
+        sourceType: period.sourceType,
         balances,
       });
 
-      setPeriod((prev) => ({ ...prev, id: savedId, sourceType }));
-      await fetchSavedPeriods();
-      return savedId;
+      setPeriod((prev) => ({
+        ...prev,
+        id: targetPeriodId,
+        status: balanceSheet.isBalanced ? 'BALANCED' : 'OPEN',
+      }));
+
+      await refreshSavedPeriods();
+      return targetPeriodId;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const importBalancesAndSave = async (
-    importedBalances: AccountingBalance[],
-    periodMeta: { description: string; startDate: string; endDate: string },
-    companyMeta?: any
-  ): Promise<string> => {
+  const loadSavedPeriod = async (periodId: string) => {
     setIsLoading(true);
     try {
-      const fullCalculated = recalculateTree(importedBalances);
-      const balanceSheetRes = AccountingEngine.calculateBalanceSheet(fullCalculated);
+      const data = await repository.getPeriodDetails(periodId);
 
-      const savedId = await repository.savePeriodWithBalances({
-        companyId: company.id,
-        accountantId: accountant.id,
-        companyData: companyMeta || company,
-        accountantData: accountant,
-        description: periodMeta.description,
-        startDate: periodMeta.startDate,
-        endDate: periodMeta.endDate,
-        isBalanced: balanceSheetRes.isBalanced,
-        sourceType: 'IMPORTED',
-        balances: fullCalculated,
-      });
-
-      await fetchSavedPeriods();
-      return savedId;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const loadPeriodById = async (periodId: string) => {
-    setIsLoading(true);
-    try {
-      const details = await repository.getPeriodDetails(periodId);
-      setPeriod({
-        id: details.period.id,
-        description: details.period.description,
-        startDate: details.period.start_date,
-        endDate: details.period.end_date,
-        sourceType: details.period.source_type || 'MANUAL',
-      });
-
-      if (details.period.companies) {
-        const c = details.period.companies;
-        setCompany({
-          id: c.id,
-          code: c.code || '',
-          corporateName: c.corporate_name,
-          tradeName: c.trade_name || '',
-          cnpj: c.cnpj,
-          nire: c.nire || '',
-          nireDate: c.nire_date || '',
-          address: c.address || '',
-          neighborhood: c.neighborhood || '',
-          city: c.city || '',
-          state: c.state || '',
-          zipCode: c.zip_code || '',
-          representativeName: c.representative_name,
-          representativeCpf: c.representative_cpf,
-          representativeRole: c.representative_role || 'Administrador',
+      if (data.period) {
+        setPeriod({
+          id: data.period.id,
+          companyId: data.period.company_id,
+          accountantId: data.period.accountant_id,
+          description: data.period.description,
+          startDate: data.period.start_date,
+          endDate: data.period.end_date,
+          status: data.period.status,
+          sourceType: data.period.source_type,
         });
+
+        if (data.period.companies) {
+          setCompany({
+            id: data.period.companies.id,
+            code: data.period.companies.code,
+            corporateName: data.period.companies.corporate_name,
+            tradeName: data.period.companies.trade_name,
+            cnpj: data.period.companies.cnpj,
+            nire: data.period.companies.nire,
+            nireDate: data.period.companies.nire_date,
+            address: data.period.companies.address,
+            neighborhood: data.period.companies.neighborhood,
+            city: data.period.companies.city,
+            state: data.period.companies.state,
+            zipCode: data.period.companies.zip_code,
+            representativeName: data.period.companies.representative_name,
+            representativeCpf: data.period.companies.representative_cpf,
+            representativeRole: data.period.companies.representative_role,
+          });
+        }
+
+        if (data.period.accountants) {
+          setAccountant({
+            id: data.period.accountants.id,
+            name: data.period.accountants.name,
+            crc: data.period.accountants.crc,
+            cpf: data.period.accountants.cpf,
+            role: data.period.accountants.role,
+          });
+        }
       }
 
-      if (details.period.accountants) {
-        const a = details.period.accountants;
-        setAccountant({
-          id: a.id,
-          name: a.name,
-          crc: a.crc,
-          cpf: a.cpf,
-          role: a.role || 'Contador',
-        });
-      }
-
-      if (details.balances && details.balances.length > 0) {
-        const merged = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
-          const found = details.balances.find((b: any) => b.codeReduced === acc.codeReduced);
+      if (data.balances && data.balances.length > 0) {
+        const mappedBalances = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
+          const found = data.balances.find((b: any) => b.codeReduced === acc.codeReduced);
           if (found) return found;
           return {
-            periodId,
+            periodId: data.period.id,
             accountId: String(acc.codeReduced),
             classification: acc.classification,
             description: acc.description,
@@ -367,7 +364,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             finalNature: acc.nature,
           };
         });
-        setBalances(recalculateTree(merged));
+        setBalances(recalculateTree(mappedBalances));
       }
     } finally {
       setIsLoading(false);
@@ -375,27 +372,95 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deleteSavedPeriod = async (periodId: string) => {
-    await repository.deletePeriod(periodId);
-    await fetchSavedPeriods();
-    if (period.id === periodId) {
-      resetBalances();
+    setIsLoading(true);
+    try {
+      await repository.deletePeriod(periodId);
+      await refreshSavedPeriods();
+      if (period.id === periodId) {
+        resetBalances();
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const formatPeriodText = (type: 'balance' | 'balancete' = 'balance') => {
-    if (!period.startDate || !period.endDate) return '';
-    const [y1, m1, d1] = period.startDate.split('-');
-    const [y2, m2, d2] = period.endDate.split('-');
-    const formattedStart = `${d1}/${m1}/${y1}`;
-    const formattedEnd = `${d2}/${m2}/${y2}`;
+  const importBalancesAndSave = async (
+    importedBalances: AccountingBalance[],
+    periodInfo: { description: string; startDate: string; endDate: string },
+    companyInfo?: Partial<CompanyData>
+  ): Promise<string> => {
+    setIsLoading(true);
+    try {
+      const merged = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
+        const fromImport = importedBalances.find((b) => b.codeReduced === acc.codeReduced);
+        const fromCurrent = balances.find((b) => b.codeReduced === acc.codeReduced);
 
-    if (type === 'balancete') {
-      return `de ${formattedStart} até ${formattedEnd}`;
+        if (fromImport && (fromImport.finalBalance > 0 || fromImport.debitAmount > 0 || fromImport.creditAmount > 0)) {
+          return fromImport;
+        }
+        if (fromCurrent && (fromCurrent.finalBalance > 0 || fromCurrent.debitAmount > 0 || fromCurrent.creditAmount > 0)) {
+          return fromCurrent;
+        }
+        return (
+          fromImport || {
+            periodId: 'imported-temp',
+            accountId: String(acc.codeReduced),
+            classification: acc.classification,
+            description: acc.description,
+            codeReduced: acc.codeReduced,
+            statementGroup: acc.statementGroup,
+            accountType: acc.accountType,
+            initialBalance: 0,
+            initialNature: acc.nature,
+            debitAmount: 0,
+            creditAmount: 0,
+            finalBalance: 0,
+            finalNature: acc.nature,
+          }
+        );
+      });
+
+      const updatedBalances = recalculateTree(merged);
+      setBalances(updatedBalances);
+
+      const newPeriodState: AccountingPeriodData = {
+        ...period,
+        description: periodInfo.description,
+        startDate: periodInfo.startDate,
+        endDate: periodInfo.endDate,
+        sourceType: 'IMPORTED',
+      };
+      setPeriod(newPeriodState);
+
+      if (companyInfo) {
+        setCompany((prev) => ({ ...prev, ...companyInfo }));
+      }
+
+      const calculated = AccountingEngine.calculateBalanceSheet(updatedBalances);
+
+      const savedPeriodId = await repository.savePeriodWithBalances({
+        companyData: { ...company, ...(companyInfo || {}) },
+        accountantData: accountant,
+        description: periodInfo.description,
+        startDate: periodInfo.startDate,
+        endDate: periodInfo.endDate,
+        isBalanced: calculated.isBalanced,
+        sourceType: 'IMPORTED',
+        balances: updatedBalances,
+      });
+
+      setPeriod((prev) => ({
+        ...prev,
+        id: savedPeriodId,
+        status: calculated.isBalanced ? 'BALANCED' : 'OPEN',
+      }));
+
+      await refreshSavedPeriods();
+      return savedPeriodId;
+    } finally {
+      setIsLoading(false);
     }
-    return `Data: ${formattedStart} a ${formattedEnd}`;
   };
-
-  const balanceSheet = AccountingEngine.calculateBalanceSheet(balances);
 
   return (
     <AccountingContext.Provider
@@ -413,12 +478,13 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateBalance,
         applyAutoBalance,
         resetBalances,
-        formatPeriodText,
         saveCurrentBalances,
-        importBalancesAndSave,
-        loadPeriodById,
-        fetchSavedPeriods,
+        loadSavedPeriod,
+        loadPeriodById: loadSavedPeriod,
         deleteSavedPeriod,
+        refreshSavedPeriods,
+        formatPeriodText,
+        importBalancesAndSave,
       }}
     >
       {children}
@@ -426,10 +492,10 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
 };
 
-export const useAccounting = () => {
+export const useAccounting = (): AccountingContextType => {
   const context = useContext(AccountingContext);
   if (!context) {
-    throw new Error('useAccounting must be used within an AccountingProvider');
+    throw new Error('useAccounting deve ser usado dentro de um AccountingProvider');
   }
   return context;
 };

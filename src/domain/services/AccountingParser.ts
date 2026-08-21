@@ -55,6 +55,8 @@ export class AccountingParser {
   }
 
   public static parseRawText(rawText: string): ParsedAccountingData {
+    const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
     let corporateName = 'JC MACHADO DIAS';
     let cnpj = '24.905.673/0001-59';
     let nire = '21201532287';
@@ -65,31 +67,80 @@ export class AccountingParser {
     let endDate = '2025-12-31';
     let description = 'Exercício 01/01/2025 a 31/12/2025';
 
-    // 1. Extração do Cabeçalho
-    const cnpjMatch = rawText.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
-    if (cnpjMatch) cnpj = cnpjMatch[0];
-
-    const nireMatch = rawText.match(/NIRE:\s*(\d+)/i);
-    if (nireMatch) nire = nireMatch[1];
-
-    const dateMatch = rawText.match(/(\d{2}\/\d{2}\/\d{4})\s*(?:a|até|-)\s*(\d{2}\/\d{2}\/\d{4})/i);
-    if (dateMatch) {
-      const [d1, m1, y1] = dateMatch[1].split('/');
-      const [d2, m2, y2] = dateMatch[2].split('/');
-      startDate = `${y1}-${m1}-${d1}`;
-      endDate = `${y2}-${m2}-${d2}`;
-      description = `Exercício ${dateMatch[1]} a ${dateMatch[2]}`;
+    for (const line of rawLines) {
+      if (line.includes('CNPJ:')) {
+        const m = line.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
+        if (m) cnpj = m[0];
+      }
+      if (line.includes('NIRE:')) {
+        const m = line.match(/NIRE:\s*(\d+)/i);
+        if (m) nire = m[1];
+      }
+      const dMatch = line.match(/(\d{2})\/(\d{2})\/(\d{4})\s*(?:a|até|-)\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+      if (dMatch) {
+        const [, d1, m1, y1, d2, m2, y2] = dMatch;
+        startDate = `${y1}-${m1}-${d1}`;
+        endDate = `${y2}-${m2}-${d2}`;
+        description = `Exercício ${d1}/${m1}/${y1} a ${d2}/${m2}/${y2}`;
+      }
+      if (line.includes('CRC:')) {
+        const m = line.match(/CRC:\s*([A-Za-z0-9]+)/i);
+        if (m) crc = m[1];
+      }
     }
 
-    const crcMatch = rawText.match(/CRC:\s*([A-Za-z0-9]+)/i);
-    if (crcMatch) crc = crcMatch[1];
+    const isBalancete = rawLines.some((l) => l.toLowerCase().includes('balancete'));
+    const valueCurrencyRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
 
-    // 2. Tokenização global do texto
-    // Transforma quebras de linha em espaços para não perder valores vizinhos
-    const cleanText = rawText.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ');
-    const isBalancete = cleanText.toLowerCase().includes('balancete');
+    const valuesByCode = new Map<number, { amount: number; nature: 'D' | 'C' }>();
+    const valuesByClass = new Map<string, { amount: number; nature: 'D' | 'C' }>();
+    const balanceteMap = new Map<number, { initial: number; initialNat: 'D' | 'C'; deb: number; cred: number; final: number; finalNat: 'D' | 'C' }>();
 
-    const valueCurrencyRegexStr = '[*]?\\d{1,3}(?:[.,]\\d{3})*(?:[.,]\\d{2})[DCdc]?';
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+
+      // Balancete: [código]
+      const bMatch = line.match(/\[(\d+)\]/);
+      if (bMatch) {
+        const code = parseInt(bMatch[1], 10);
+        const chunk = rawLines.slice(i, i + 3).join(' ');
+        const matches = chunk.match(valueCurrencyRegex);
+        if (matches && matches.length >= 4) {
+          balanceteMap.set(code, {
+            initial: this.parseCurrency(matches[0]).amount,
+            initialNat: this.parseCurrency(matches[0]).nature,
+            deb: this.parseCurrency(matches[1]).amount,
+            cred: this.parseCurrency(matches[2]).amount,
+            final: this.parseCurrency(matches[3]).amount,
+            finalNat: this.parseCurrency(matches[3]).nature,
+          });
+        }
+      }
+
+      // DRE: Classificação (3-x ou 4-x) + Código Reduzido + Valor
+      const dreMatch = line.match(/([34]-[0-9]+(?:-[0-9]+)*)\s+(\d{3,5})\s+([*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?)/);
+      if (dreMatch) {
+        const cls = dreMatch[1].replace(/\./g, '-');
+        const code = parseInt(dreMatch[2], 10);
+        const val = this.parseCurrency(dreMatch[3]);
+        valuesByClass.set(cls, val);
+        valuesByCode.set(code, val);
+      }
+
+      // Balanço Patrimonial: Classificação
+      const balClassMatch = line.match(/(?:^|\s)(1(?:-[0-9]+)*|2(?:-[0-9]+)*)(?:\s+|$)/);
+      if (balClassMatch) {
+        const cls = balClassMatch[1].replace(/\./g, '-');
+        let valMatches = line.match(valueCurrencyRegex);
+        if (!valMatches || valMatches.length === 0) {
+          const nextBlock = rawLines.slice(i + 1, i + 4).join(' ');
+          valMatches = nextBlock.match(valueCurrencyRegex);
+        }
+        if (valMatches && valMatches.length > 0) {
+          valuesByClass.set(cls, this.parseCurrency(valMatches[0]));
+        }
+      }
+    }
 
     const balances: AccountingBalance[] = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
       let finalBalance = 0;
@@ -99,57 +150,24 @@ export class AccountingParser {
       let initialBalance = 0;
       let initialNature: 'D' | 'C' = acc.nature;
 
-      const normClass = acc.classification.replace(/-/g, '[-.]');
-      const codeStr = acc.codeReduced;
+      const normClass = acc.classification.replace(/\./g, '-');
 
-      // Padrão 1: Balanço Patrimonial (ex: "1-1-01-01" seguido logo após por seu valor monetário)
-      // Aceita texto intermediário de até 50 caracteres (como notas ou descrições)
-      const balancePattern = new RegExp(
-        `(?:^|\\s)${normClass}\\s+(?:Nota\\s+\\d+\\s+)?(${valueCurrencyRegexStr})`,
-        'i'
-      );
-
-      // Padrão 2: DRE (ex: "3-1-01-03 1211 30.416.659,74C" ou "1211 30.416.659,74C")
-      const drePattern = new RegExp(
-        `(?:${normClass}\\s+)?(?:${codeStr})\\s+(${valueCurrencyRegexStr})`,
-        'i'
-      );
-
-      // Padrão 3: Balancete (ex: "[35] Caixa ... 0,00D 18.148.950,89 15.360.867,31 2.788.083,58D")
-      const balancetePattern = new RegExp(
-        `\\[${codeStr}\\][^\\[]*?(${valueCurrencyRegexStr})\\s+(${valueCurrencyRegexStr})\\s+(${valueCurrencyRegexStr})\\s+(${valueCurrencyRegexStr})`,
-        'i'
-      );
-
-      if (isBalancete) {
-        const bMatch = cleanText.match(balancetePattern);
-        if (bMatch) {
-          const init = this.parseCurrency(bMatch[1]);
-          const deb = this.parseCurrency(bMatch[2]);
-          const cred = this.parseCurrency(bMatch[3]);
-          const fin = this.parseCurrency(bMatch[4]);
-
-          initialBalance = init.amount;
-          initialNature = init.nature;
-          debitAmount = deb.amount;
-          creditAmount = cred.amount;
-          finalBalance = fin.amount;
-          finalNature = fin.nature;
-        }
-      } else {
-        // Balanço ou DRE
-        const dMatch = cleanText.match(drePattern);
-        const balMatch = cleanText.match(balancePattern);
-
-        if (dMatch && (acc.statementGroup === 'RECEITA' || acc.statementGroup === 'CUSTO' || acc.statementGroup === 'DESPESA')) {
-          const parsed = this.parseCurrency(dMatch[1]);
-          finalBalance = parsed.amount;
-          finalNature = parsed.nature;
-        } else if (balMatch) {
-          const parsed = this.parseCurrency(balMatch[1]);
-          finalBalance = parsed.amount;
-          finalNature = parsed.nature;
-        }
+      if (isBalancete && balanceteMap.has(acc.codeReduced)) {
+        const b = balanceteMap.get(acc.codeReduced)!;
+        initialBalance = b.initial;
+        initialNature = b.initialNat;
+        debitAmount = b.deb;
+        creditAmount = b.cred;
+        finalBalance = b.final;
+        finalNature = b.finalNat;
+      } else if (valuesByCode.has(acc.codeReduced)) {
+        const v = valuesByCode.get(acc.codeReduced)!;
+        finalBalance = v.amount;
+        finalNature = v.nature;
+      } else if (valuesByClass.has(normClass)) {
+        const v = valuesByClass.get(normClass)!;
+        finalBalance = v.amount;
+        finalNature = v.nature;
       }
 
       return {

@@ -35,30 +35,23 @@ export const DREReport: React.FC<DREReportProps> = ({
     (b) => b.statementGroup === 'RECEITA' || b.statementGroup === 'CUSTO' || b.statementGroup === 'DESPESA'
   );
 
-  // Cálculos de Resultado
-  const revenda = balances.find((b) => b.classification === '3-1-01-03')?.finalBalance || 0;
-  const icms = balances.find((b) => b.classification === '3-2-01-03')?.finalBalance || 0;
-  const devolucoesVenda = balances.find((b) => b.classification === '3-2-01-06')?.finalBalance || 0;
-  const totalDeducoes = icms + devolucoesVenda;
-  const cmv = balances.find((b) => b.classification === '3-2-03-03')?.finalBalance || 0;
-  const bonificacoes = balances.find((b) => b.classification === '3-5-01-02')?.finalBalance || 0;
+  const revenda = balances.find((b) => b.codeReduced === 1211)?.finalBalance || 0;
+  const icms = balances.find((b) => b.codeReduced === 1260)?.finalBalance || 0;
+  const devolucoes = balances.find((b) => b.codeReduced === 1280)?.finalBalance || 0;
+  const cmv = balances.find((b) => b.codeReduced === 1974)?.finalBalance || 0;
+  const bonificacao = balances.find((b) => b.codeReduced === 1442)?.finalBalance || 0;
 
-  const totalReceitas = revenda - totalDeducoes - cmv + bonificacoes;
+  const totalReceitas = revenda - icms - devolucoes - cmv + bonificacao;
 
-  const despesasOperacionais = balances
-    .filter((b) => b.classification.startsWith('4-1') && b.accountType === 'ANALITICA')
+  const totalDespesas = balances
+    .filter((b) => b.statementGroup === 'DESPESA' && b.accountType === 'ANALITICA')
     .reduce((acc, curr) => acc + (curr.finalBalance || 0), 0);
 
-  const despesasFinanceiras = balances
-    .filter((b) => b.classification.startsWith('4-2') && b.accountType === 'ANALITICA')
-    .reduce((acc, curr) => acc + (curr.finalBalance || 0), 0);
-
-  const totalDespesas = despesasOperacionais + despesasFinanceiras;
   const lucroLiquido = totalReceitas - totalDespesas;
 
   return (
     <div className="max-w-4xl mx-auto bg-white p-8 font-sans text-xs text-gray-900 border shadow-sm print:border-none print:shadow-none print:p-0 print:max-w-full">
-      {/* Cabeçalho */}
+      {/* Cabeçalho Oficial */}
       <div className="border-b-2 border-black pb-3 mb-4">
         <div className="flex justify-between items-start">
           <div>
@@ -71,12 +64,12 @@ export const DREReport: React.FC<DREReportProps> = ({
           </div>
           <div className="text-right font-semibold">
             <p className="text-sm font-bold">Demonstração do Resultado do Exercício</p>
-            <p>Período: {periodText}</p>
+            <p>{periodText}</p>
           </div>
         </div>
       </div>
 
-      {/* Tabela de Contas DRE */}
+      {/* Tabela Idêntica ao Modelo da DRE */}
       <table className="w-full border-collapse mb-6">
         <thead>
           <tr className="border-b border-black text-left font-bold">
@@ -104,7 +97,7 @@ export const DREReport: React.FC<DREReportProps> = ({
                 </td>
                 <td className="py-1 text-center font-mono text-gray-600">{item.classification}</td>
                 <td className="py-1 text-center font-mono text-gray-500">{item.codeReduced}</td>
-                <td className="py-1 text-right font-mono font-semibold">
+                <td className="py-1 text-right font-mono">
                   {formatCurrency(item.finalBalance)}
                   {item.finalNature}
                 </td>
@@ -114,15 +107,15 @@ export const DREReport: React.FC<DREReportProps> = ({
         </tbody>
       </table>
 
-      {/* Bloco de Resultado Final da DRE */}
+      {/* Resumo do Resultado do Exercício */}
       <div className="border-t-2 border-black pt-3 mb-6 print:break-inside-avoid space-y-1 font-mono text-xs">
         <div className="flex justify-between font-bold">
-          <span>TOTAL RECEITAS LÍQUIDAS:</span>
+          <span>RECEITAS LÍQUIDAS:</span>
           <span>{formatCurrency(Math.max(totalReceitas, 0))} C</span>
         </div>
         <div className="flex justify-between font-bold text-rose-700">
-          <span>TOTAL DESPESAS OPERACIONAIS + FINANCEIRAS:</span>
-          <span>{formatCurrency(totalDespesas)} D</span>
+          <span>DESPESAS + CUSTOS:</span>
+          <span>{formatCurrency(totalDespesas + cmv + icms + devolucoes)} D</span>
         </div>
         <div className="flex justify-between font-extrabold text-sm border-t border-black pt-2 text-emerald-800">
           <span>LUCRO LÍQUIDO DO EXERCÍCIO:</span>
