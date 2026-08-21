@@ -31,7 +31,7 @@ export default function ImportacoesPage() {
         const buffer = await file.arrayBuffer();
         const parsed = AccountingParser.parseExcelBuffer(buffer, file.name);
         setParsedData(parsed);
-        setRawText(`[Balancete Analítico Excel Carregado: ${file.name}]`);
+        setRawText(`[Balancete Analítico Carregado: ${file.name}]`);
       } else if (fileName.endsWith('.pdf')) {
         const formData = new FormData();
         formData.append('file', file);

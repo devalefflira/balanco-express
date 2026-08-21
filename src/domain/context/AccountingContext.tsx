@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { AccountingEngine, BalanceSheetResult } from '@/domain/services/AccountingEngine';
-import { AutoBalancer } from '@/domain/services/AutoBalancer';
+import { AutoBalancer, BalancingAction } from '@/domain/services/AutoBalancer';
 import { AccountingRepository, SavedPeriodSummary } from '@/infrastructure/repositories/AccountingRepository';
 
 export interface CompanyData {
@@ -44,6 +44,19 @@ export interface AccountingPeriodData {
   sourceType: 'MANUAL' | 'IMPORTED';
 }
 
+export interface ModificationHistoryEntry {
+  id: string;
+  timestamp: string;
+  accountCode: number;
+  accountName: string;
+  classification: string;
+  field: string;
+  previousValue: number;
+  newValue: number;
+  counterpart?: BalancingAction;
+  snapshot: AccountingBalance[];
+}
+
 interface AccountingContextType {
   balances: AccountingBalance[];
   period: AccountingPeriodData;
@@ -51,12 +64,16 @@ interface AccountingContextType {
   accountant: AccountantData;
   balanceSheet: BalanceSheetResult;
   savedPeriods: SavedPeriodSummary[];
+  history: ModificationHistoryEntry[];
   isLoading: boolean;
   setPeriod: (period: AccountingPeriodData) => void;
   setCompany: (company: CompanyData) => void;
   setAccountant: (accountant: AccountantData) => void;
   updateBalance: (codeReduced: number, field: keyof AccountingBalance, value: any) => void;
+  recordHistoryEntry: (codeReduced: number, field: string, prevVal: number, newVal: number, snapshot: AccountingBalance[]) => void;
   applyAutoBalance: () => void;
+  undoLastChange: () => void;
+  undoAllChanges: () => void;
   resetBalances: () => void;
   saveCurrentBalances: () => Promise<string>;
   loadSavedPeriod: (periodId: string) => Promise<void>;
@@ -113,6 +130,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [period, setPeriod] = useState<AccountingPeriodData>(initialPeriod);
   const [savedPeriods, setSavedPeriods] = useState<SavedPeriodSummary[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [history, setHistory] = useState<ModificationHistoryEntry[]>([]);
+  const [initialSnapshot, setInitialSnapshot] = useState<AccountingBalance[]>([]);
 
   const [balances, setBalances] = useState<AccountingBalance[]>(() => {
     return DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
@@ -171,29 +190,13 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         totalInitial += child.initialBalance || 0;
 
         if (syn.statementGroup === 'ATIVO') {
-          if (child.finalNature === 'D') {
-            totalFinal += child.finalBalance || 0;
-          } else {
-            totalFinal -= child.finalBalance || 0;
-          }
+          totalFinal += child.finalNature === 'D' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         } else if (syn.statementGroup === 'PASSIVO' || syn.statementGroup === 'PL') {
-          if (child.finalNature === 'C') {
-            totalFinal += child.finalBalance || 0;
-          } else {
-            totalFinal -= child.finalBalance || 0;
-          }
+          totalFinal += child.finalNature === 'C' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         } else if (syn.statementGroup === 'RECEITA') {
-          if (child.finalNature === 'C') {
-            totalFinal += child.finalBalance || 0;
-          } else {
-            totalFinal -= child.finalBalance || 0;
-          }
+          totalFinal += child.finalNature === 'C' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         } else {
-          if (child.finalNature === 'D') {
-            totalFinal += child.finalBalance || 0;
-          } else {
-            totalFinal -= child.finalBalance || 0;
-          }
+          totalFinal += child.finalNature === 'D' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         }
       }
 
@@ -237,13 +240,86 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
         return item;
       });
+
       return recalculateTree(updated);
     });
   };
 
+  const recordHistoryEntry = (
+    codeReduced: number,
+    field: string,
+    prevVal: number,
+    newVal: number,
+    snapshot: AccountingBalance[]
+  ) => {
+    const target = balances.find((item) => item.codeReduced === codeReduced);
+    if (!target) return;
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+    setHistory((h) => [
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: timeStr,
+        accountCode: codeReduced,
+        accountName: target.description,
+        classification: target.classification,
+        field,
+        previousValue: prevVal,
+        newValue: newVal,
+        snapshot,
+      },
+      ...h,
+    ]);
+  };
+
   const applyAutoBalance = () => {
+    const snapshot = balances.map((b) => ({ ...b }));
     const result = AutoBalancer.autoBalance(balances);
-    setBalances(recalculateTree(result.updatedBalances));
+    if (!result.adjustmentMade) return;
+
+    const recalculated = recalculateTree(result.updatedBalances);
+    setBalances(recalculated);
+
+    if (result.actionDetails) {
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+      setHistory((h) => [
+        {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: timeStr,
+          accountCode: result.actionDetails!.targetCodeReduced,
+          accountName: result.actionDetails!.targetAccount,
+          classification: result.actionDetails!.targetClassification,
+          field: 'AutoBalance',
+          previousValue: 0,
+          newValue: result.actionDetails!.amount,
+          counterpart: result.actionDetails,
+          snapshot,
+        },
+        ...h,
+      ]);
+    }
+  };
+
+  const undoLastChange = () => {
+    if (history.length === 0) return;
+    const [lastEntry, ...restHistory] = history;
+    setBalances(recalculateTree(lastEntry.snapshot));
+    setHistory(restHistory);
+  };
+
+  const undoAllChanges = () => {
+    if (initialSnapshot.length > 0) {
+      setBalances(recalculateTree(initialSnapshot));
+      setHistory([]);
+    } else if (history.length > 0) {
+      const oldest = history[history.length - 1];
+      setBalances(recalculateTree(oldest.snapshot));
+      setHistory([]);
+    }
   };
 
   const resetBalances = () => {
@@ -263,6 +339,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       finalNature: acc.nature,
     }));
     setBalances(blank);
+    setHistory([]);
+    setInitialSnapshot([]);
     setPeriod({ ...initialPeriod, id: undefined });
   };
 
@@ -380,7 +458,10 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             finalNature: acc.nature,
           };
         });
-        setBalances(recalculateTree(mappedBalances));
+        const tree = recalculateTree(mappedBalances);
+        setBalances(tree);
+        setInitialSnapshot(tree.map((b) => ({ ...b })));
+        setHistory([]);
       }
     } finally {
       setIsLoading(false);
@@ -438,6 +519,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const updatedBalances = recalculateTree(merged);
       setBalances(updatedBalances);
+      setInitialSnapshot(updatedBalances.map((b) => ({ ...b })));
+      setHistory([]);
 
       const newPeriodState: AccountingPeriodData = {
         ...period,
@@ -487,12 +570,16 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         accountant,
         balanceSheet,
         savedPeriods,
+        history,
         isLoading,
         setPeriod,
         setCompany,
         setAccountant,
         updateBalance,
+        recordHistoryEntry,
         applyAutoBalance,
+        undoLastChange,
+        undoAllChanges,
         resetBalances,
         saveCurrentBalances,
         loadSavedPeriod,

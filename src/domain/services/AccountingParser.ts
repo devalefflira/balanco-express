@@ -60,8 +60,10 @@ export class AccountingParser {
   }
 
   private static extractDates(text: string, filenameHint: string = ''): { startDate: string; endDate: string; description: string } {
-    // 1. Padrão: DD/MM/AAAA até/a DD/MM/AAAA
-    const rangeMatch = text.match(/(\d{2})[./\-](\d{2})[./\-](\d{4})\s*(?:a|até|ate|-)\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
+    const combined = `${filenameHint} ${text}`;
+
+    // 1. Padrão explícito: DD/MM/AAAA até DD/MM/AAAA
+    const rangeMatch = combined.match(/(\d{2})[./\-](\d{2})[./\-](\d{4})\s*(?:a|até|ate|-)\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
     if (rangeMatch) {
       const [, d1, m1, y1, d2, m2, y2] = rangeMatch;
       return {
@@ -71,21 +73,8 @@ export class AccountingParser {
       };
     }
 
-    // 2. Padrão: Encerrado em DD/MM/AAAA ou até DD/MM/AAAA
-    const singleMatch = text.match(/(?:encerrado em|posi[cç][aã]o em|at[eé])\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
-    if (singleMatch) {
-      const [, d, m, y] = singleMatch;
-      const startM = m === '03' ? '01' : (m === '06' ? '04' : (m === '09' ? '07' : '01'));
-      return {
-        startDate: `${y}-${startM}-01`,
-        endDate: `${y}-${m}-${d}`,
-        description: `Exercício 01/${startM}/${y} a ${d}/${m}/${y}`,
-      };
-    }
-
-    // 3. Fallback por nome do arquivo (ex: 1T2026, 2025, 2026)
-    const combinedHint = `${text} ${filenameHint}`;
-    const trimMatch = combinedHint.match(/(\d)T(\d{4})/i);
+    // 2. Padrão Trimestral (ex: 1T2026, 1T_2026, 1T-2026, 1_trimestre_2026)
+    const trimMatch = combined.match(/([1-4])\s*(?:T|trimestre|º\s*trimestre|o\s*trimestre)[_\-\s]*(\d{4})/i);
     if (trimMatch) {
       const quarter = parseInt(trimMatch[1], 10);
       const year = trimMatch[2];
@@ -99,16 +88,37 @@ export class AccountingParser {
       return {
         startDate: q.start,
         endDate: q.end,
-        description: `1º Trimestre 01/01/${year} a ${q.dEnd}/${q.mEnd}/${year}`,
+        description: `${quarter}º Trimestre 01/01/${year} a ${q.dEnd}/${q.mEnd}/${year}`,
       };
     }
 
-    const yearMatch = combinedHint.match(/\b(202[4-9]|203[0-9])\b/);
-    const y = yearMatch ? yearMatch[1] : '2026';
+    // 3. Padrão: Encerrado em DD/MM/AAAA ou Posição em DD/MM/AAAA
+    const singleMatch = combined.match(/(?:encerrado em|posi[cç][aã]o em|at[eé])\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
+    if (singleMatch) {
+      const [, d, m, y] = singleMatch;
+      const startM = m === '03' ? '01' : (m === '06' ? '04' : (m === '09' ? '07' : '01'));
+      return {
+        startDate: `${y}-${startM}-01`,
+        endDate: `${y}-${m}-${d}`,
+        description: `Exercício 01/${startM}/${y} a ${d}/${m}/${y}`,
+      };
+    }
+
+    // 4. Reconhecimento robusto do Ano (ex: balancete_2025.xls, 2024, 2025, 2026)
+    const yearMatch = combined.match(/(?:^|[^\d])(20\d{2})(?:[^\d]|$)/);
+    if (yearMatch) {
+      const y = yearMatch[1];
+      return {
+        startDate: `${y}-01-01`,
+        endDate: `${y}-12-31`,
+        description: `Exercício 01/01/${y} a 31/12/${y}`,
+      };
+    }
+
     return {
-      startDate: `${y}-01-01`,
-      endDate: `${y}-12-31`,
-      description: `Exercício 01/01/${y} a 31/12/${y}`,
+      startDate: '2025-01-01',
+      endDate: '2025-12-31',
+      description: 'Exercício 01/01/2025 a 31/12/2025',
     };
   }
 

@@ -1,99 +1,105 @@
-import Decimal from 'decimal.js';
 import { AccountingBalance } from '../entities/AccountingBalance';
 import { AccountingEngine } from './AccountingEngine';
 
-export interface BalanceAdjustmentSuggestion {
-  targetAccountId: string;
-  targetAccountDescription: string;
-  suggestedDebit: number;
-  suggestedCredit: number;
-  adjustmentAmount: number;
-  newFinalBalance: number;
-  newFinalNature: 'D' | 'C';
+export interface BalancingAction {
+  id: string;
+  timestamp: string;
+  sourceAccount: string;
+  sourceClassification: string;
+  targetAccount: string;
+  targetClassification: string;
+  targetCodeReduced: number;
+  amount: number;
+  type: 'DEBIT' | 'CREDIT' | 'BALANCE';
+  description: string;
+}
+
+export interface AutoBalanceResult {
+  updatedBalances: AccountingBalance[];
+  adjustmentMade: boolean;
+  adjustmentValue: number;
+  actionDetails?: BalancingAction;
 }
 
 export class AutoBalancer {
-  /**
-   * Recalcula a árvore de contas e aplica ajuste automático na conta balanceadora
-   * @param balances Lista completa de saldos
-   * @param balancingAccountClassification Classificação da conta de ajuste (ex: '1-1-07' Sócios, '2-4-08' Lucros Acumulados, ou '1-1-01-01' Caixa)
-   */
-  public static autoBalance(
-    balances: AccountingBalance[],
-    balancingAccountClassification: string = '2-4-08-01'
-  ): { updatedBalances: AccountingBalance[]; adjustmentMade: boolean; adjustmentValue: number } {
-    const report = AccountingEngine.calculateBalanceSheet(balances);
+  public static autoBalance(balances: AccountingBalance[]): AutoBalanceResult {
+    const calculation = AccountingEngine.calculateBalanceSheet(balances);
 
-    if (report.isBalanced) {
-      return { updatedBalances: balances, adjustmentMade: false, adjustmentValue: 0 };
+    if (calculation.isBalanced) {
+      return {
+        updatedBalances: balances,
+        adjustmentMade: false,
+        adjustmentValue: 0,
+      };
     }
 
-    const discrepancy = report.discrepancy; // Se positivo, Ativo > Passivo+PL. Se negativo, Ativo < Passivo+PL.
-    const updated = balances.map(b => ({ ...b }));
+    const discrepancy = calculation.discrepancy.toNumber();
+    const round = (val: number) => Math.round(val * 100) / 100;
+    const diff = round(discrepancy);
 
-    // Localiza a conta balanceadora analítica
-    const targetIndex = updated.findIndex(
-      b => b.classification.startsWith(balancingAccountClassification) && b.accountType === 'ANALITICA'
-    );
+    const updated = balances.map((b) => ({ ...b }));
 
-    if (targetIndex === -1) {
-      // Se não achar a conta padrão, procura Lucro Acumulado ou Crédito de Sócios
-      const fallbackIndex = updated.findIndex(
-        b => (b.classification.includes('2-4-08') || b.classification.includes('1-1-07')) && b.accountType === 'ANALITICA'
-      );
-      if (fallbackIndex === -1) {
-        return { updatedBalances: balances, adjustmentMade: false, adjustmentValue: discrepancy.toNumber() };
-      }
-      return this.applyDiscrepancyToAccount(updated, fallbackIndex, discrepancy);
+    // Conta preferencial para contrapartida: [1029] Lucro / Prejuízo do Período (PL)
+    let targetAcc = updated.find((b) => b.codeReduced === 1029 && b.accountType === 'ANALITICA');
+
+    // Fallback: [939] Capital Social ou [1939] Fundo de Reserva
+    if (!targetAcc) {
+      targetAcc = updated.find((b) => b.statementGroup === 'PL' && b.accountType === 'ANALITICA');
     }
 
-    return this.applyDiscrepancyToAccount(updated, targetIndex, discrepancy);
-  }
-
-  private static applyDiscrepancyToAccount(
-    balances: AccountingBalance[],
-    targetIndex: number,
-    discrepancy: Decimal
-  ) {
-    const target = balances[targetIndex];
-    const currentFinal = new Decimal(target.finalBalance || 0);
-
-    let newFinal: Decimal;
-    let newNature: 'D' | 'C' = target.finalNature;
-
-    // Se for conta de Passivo ou PL (Natureza Credora por padrão):
-    if (target.statementGroup === 'PASSIVO' || target.statementGroup === 'PL') {
-      const net = (target.finalNature === 'C' ? currentFinal : currentFinal.negated()).plus(discrepancy);
-      if (net.isNegative()) {
-        newFinal = net.abs();
-        newNature = 'D';
-      } else {
-        newFinal = net;
-        newNature = 'C';
-      }
-    } 
-    // Se for conta de Ativo (Natureza Devedora por padrão):
-    else {
-      const net = (target.finalNature === 'D' ? currentFinal : currentFinal.negated()).minus(discrepancy);
-      if (net.isNegative()) {
-        newFinal = net.abs();
-        newNature = 'C';
-      } else {
-        newFinal = net;
-        newNature = 'D';
-      }
+    if (!targetAcc) {
+      return {
+        updatedBalances: balances,
+        adjustmentMade: false,
+        adjustmentValue: 0,
+      };
     }
 
-    balances[targetIndex] = {
-      ...target,
-      finalBalance: newFinal.toDecimalPlaces(2).toNumber(),
-      finalNature: newNature
+    const initialTargetBalance = Number(targetAcc.finalBalance || 0);
+    const initialTargetNat = targetAcc.finalNature;
+
+    let newBalance = initialTargetBalance;
+    let newNat: 'D' | 'C' = initialTargetNat;
+
+    // Se Ativo > Passivo+PL (diff > 0), precisamos aumentar o PL com Crédito (+diff)
+    // Se Ativo < Passivo+PL (diff < 0), precisamos reduzir o PL com Débito (-diff)
+    let signedValue = initialTargetNat === 'C' ? initialTargetBalance : -initialTargetBalance;
+    signedValue += diff;
+
+    if (signedValue >= 0) {
+      newBalance = round(signedValue);
+      newNat = 'C';
+    } else {
+      newBalance = round(Math.abs(signedValue));
+      newNat = 'D';
+    }
+
+    targetAcc.finalBalance = newBalance;
+    targetAcc.finalNature = newNat;
+    targetAcc.creditAmount = round((targetAcc.creditAmount || 0) + (diff > 0 ? diff : 0));
+    targetAcc.debitAmount = round((targetAcc.debitAmount || 0) + (diff < 0 ? Math.abs(diff) : 0));
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+    const actionDetails: BalancingAction = {
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: timeStr,
+      sourceAccount: 'Discrepância Geral do Balanço',
+      sourceClassification: 'Ajuste Automático',
+      targetAccount: targetAcc.description,
+      targetClassification: targetAcc.classification,
+      targetCodeReduced: targetAcc.codeReduced,
+      amount: Math.abs(diff),
+      type: diff > 0 ? 'CREDIT' : 'DEBIT',
+      description: `Contrapartida de ${diff > 0 ? 'Crédito' : 'Débito'} aplicada em ${targetAcc.classification} - ${targetAcc.description}`,
     };
 
     return {
-      updatedBalances: balances,
+      updatedBalances: updated,
       adjustmentMade: true,
-      adjustmentValue: discrepancy.toDecimalPlaces(2).toNumber()
+      adjustmentValue: Math.abs(diff),
+      actionDetails,
     };
   }
 }
