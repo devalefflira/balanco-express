@@ -59,7 +59,60 @@ export class AccountingParser {
     return { amount, nature };
   }
 
-  public static parseExcelBuffer(buffer: ArrayBuffer): ParsedAccountingData {
+  private static extractDates(text: string, filenameHint: string = ''): { startDate: string; endDate: string; description: string } {
+    // 1. Padrão: DD/MM/AAAA até/a DD/MM/AAAA
+    const rangeMatch = text.match(/(\d{2})[./\-](\d{2})[./\-](\d{4})\s*(?:a|até|ate|-)\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
+    if (rangeMatch) {
+      const [, d1, m1, y1, d2, m2, y2] = rangeMatch;
+      return {
+        startDate: `${y1}-${m1}-${d1}`,
+        endDate: `${y2}-${m2}-${d2}`,
+        description: `Exercício ${d1}/${m1}/${y1} a ${d2}/${m2}/${y2}`,
+      };
+    }
+
+    // 2. Padrão: Encerrado em DD/MM/AAAA ou até DD/MM/AAAA
+    const singleMatch = text.match(/(?:encerrado em|posi[cç][aã]o em|at[eé])\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
+    if (singleMatch) {
+      const [, d, m, y] = singleMatch;
+      const startM = m === '03' ? '01' : (m === '06' ? '04' : (m === '09' ? '07' : '01'));
+      return {
+        startDate: `${y}-${startM}-01`,
+        endDate: `${y}-${m}-${d}`,
+        description: `Exercício 01/${startM}/${y} a ${d}/${m}/${y}`,
+      };
+    }
+
+    // 3. Fallback por nome do arquivo (ex: 1T2026, 2025, 2026)
+    const combinedHint = `${text} ${filenameHint}`;
+    const trimMatch = combinedHint.match(/(\d)T(\d{4})/i);
+    if (trimMatch) {
+      const quarter = parseInt(trimMatch[1], 10);
+      const year = trimMatch[2];
+      const ranges: Record<number, { start: string; end: string; dEnd: string; mEnd: string }> = {
+        1: { start: `${year}-01-01`, end: `${year}-03-31`, dEnd: '31', mEnd: '03' },
+        2: { start: `${year}-04-01`, end: `${year}-06-30`, dEnd: '30', mEnd: '06' },
+        3: { start: `${year}-07-01`, end: `${year}-09-30`, dEnd: '30', mEnd: '09' },
+        4: { start: `${year}-10-01`, end: `${year}-12-31`, dEnd: '31', mEnd: '12' },
+      };
+      const q = ranges[quarter] || ranges[1];
+      return {
+        startDate: q.start,
+        endDate: q.end,
+        description: `1º Trimestre 01/01/${year} a ${q.dEnd}/${q.mEnd}/${year}`,
+      };
+    }
+
+    const yearMatch = combinedHint.match(/\b(202[4-9]|203[0-9])\b/);
+    const y = yearMatch ? yearMatch[1] : '2026';
+    return {
+      startDate: `${y}-01-01`,
+      endDate: `${y}-12-31`,
+      description: `Exercício 01/01/${y} a 31/12/${y}`,
+    };
+  }
+
+  public static parseExcelBuffer(buffer: ArrayBuffer, fileName: string = ''): ParsedAccountingData {
     const workbook = XLSX.read(buffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
@@ -71,16 +124,12 @@ export class AccountingParser {
     let nireDate = '2016-05-31';
     let accountantName = 'JAMAILA FONSECA LOPES COSTA';
     let crc = '0124650';
-    let startDate = '2024-01-01';
-    let endDate = '2024-12-31';
-    let description = 'Exercício 01/01/2024 a 31/12/2024';
 
-    const balanceteMap = new Map<number, { initial: number; initialNat: 'D' | 'C'; deb: number; cred: number; final: number; finalNat: 'D' | 'C' }>();
-    const valueCurrencyRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
+    const fullText = rawMatrix.map((row) => row.join(' ')).join('\n');
+    const { startDate, endDate, description } = this.extractDates(fullText, fileName);
 
     for (const row of rawMatrix) {
       const rowStr = row.join(' ');
-
       if (rowStr.includes('CNPJ')) {
         const m = rowStr.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
         if (m) cnpj = m[0];
@@ -89,15 +138,13 @@ export class AccountingParser {
         const m = rowStr.match(/NIRE:\s*(\d+)/i);
         if (m) nire = m[1];
       }
-      const dMatch = rowStr.match(/(\d{2}\/\d{2}\/\d{4})\s*(?:a|até|-)\s*(\d{2}\/\d{2}\/\d{4})/i);
-      if (dMatch) {
-        const [d1, m1, y1] = dMatch[1].split('/');
-        const [d2, m2, y2] = dMatch[2].split('/');
-        startDate = `${y1}-${m1}-${d1}`;
-        endDate = `${y2}-${m2}-${d2}`;
-        description = `Exercício ${dMatch[1]} a ${dMatch[2]}`;
-      }
+    }
 
+    const balanceteMap = new Map<number, { initial: number; initialNat: 'D' | 'C'; deb: number; cred: number; final: number; finalNat: 'D' | 'C' }>();
+    const valueCurrencyRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
+
+    for (const row of rawMatrix) {
+      const rowStr = row.join(' ');
       const codeMatch = rowStr.match(/\[(\d+)\]/);
       if (codeMatch) {
         const code = parseInt(codeMatch[1], 10);
@@ -171,7 +218,7 @@ export class AccountingParser {
     };
   }
 
-  public static parseRawText(rawText: string): ParsedAccountingData {
+  public static parseRawText(rawText: string, fileName: string = ''): ParsedAccountingData {
     const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
     let corporateName = 'JC MACHADO DIAS';
@@ -180,9 +227,8 @@ export class AccountingParser {
     let nireDate = '2016-05-31';
     let accountantName = 'JAMAILA FONSECA LOPES COSTA';
     let crc = '0124650';
-    let startDate = '2024-01-01';
-    let endDate = '2024-12-31';
-    let description = 'Exercício 01/01/2024 a 31/12/2024';
+
+    const { startDate, endDate, description } = this.extractDates(rawText, fileName);
 
     for (const line of rawLines) {
       if (line.includes('CNPJ:')) {
@@ -192,14 +238,6 @@ export class AccountingParser {
       if (line.includes('NIRE:')) {
         const m = line.match(/NIRE:\s*(\d+)/i);
         if (m) nire = m[1];
-      }
-      const dMatch = line.match(/(\d{2}\/\d{2}\/\d{4})\s*(?:a|até|-)\s*(\d{2}\/\d{2}\/\d{4})/i);
-      if (dMatch) {
-        const [d1, m1, y1] = dMatch[1].split('/');
-        const [d2, m2, y2] = dMatch[2].split('/');
-        startDate = `${y1}-${m1}-${d1}`;
-        endDate = `${y2}-${m2}-${d2}`;
-        description = `Exercício ${dMatch[1]} a ${dMatch[2]}`;
       }
       if (line.includes('CRC:')) {
         const m = line.match(/CRC:\s*([A-Za-z0-9]+)/i);

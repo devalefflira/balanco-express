@@ -29,7 +29,7 @@ export default function ImportacoesPage() {
 
       if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
         const buffer = await file.arrayBuffer();
-        const parsed = AccountingParser.parseExcelBuffer(buffer);
+        const parsed = AccountingParser.parseExcelBuffer(buffer, file.name);
         setParsedData(parsed);
         setRawText(`[Balancete Analítico Excel Carregado: ${file.name}]`);
       } else if (fileName.endsWith('.pdf')) {
