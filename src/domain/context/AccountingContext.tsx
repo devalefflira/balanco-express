@@ -98,9 +98,9 @@ const initialAccountant: AccountantData = {
 };
 
 const initialPeriod: AccountingPeriodData = {
-  description: 'Exercício 01/01/2025 a 31/12/2025',
-  startDate: '2025-01-01',
-  endDate: '2025-12-31',
+  description: 'Exercício 01/01/2024 a 31/12/2024',
+  startDate: '2024-01-01',
+  endDate: '2024-12-31',
   status: 'OPEN',
   sourceType: 'MANUAL',
 };
@@ -137,7 +137,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const list = await repository.getSavedPeriods();
       setSavedPeriods(list);
     } catch (e) {
-      console.error('Erro ao carregar lista de períodos:', e);
+      console.error('Erro ao carregar períodos salvos:', e);
     }
   }, []);
 
@@ -189,7 +189,6 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             totalFinal -= child.finalBalance || 0;
           }
         } else {
-          // CUSTO e DESPESA
           if (child.finalNature === 'D') {
             totalFinal += child.finalBalance || 0;
           } else {
@@ -222,7 +221,19 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setBalances((prev) => {
       const updated = prev.map((item) => {
         if (item.codeReduced === codeReduced) {
-          return { ...item, [field]: value };
+          const newItem = { ...item, [field]: value };
+          if (field === 'initialBalance' || field === 'debitAmount' || field === 'creditAmount') {
+            const calculated = AccountingEngine.calculateFinalBalance(
+              Number(newItem.initialBalance || 0),
+              newItem.initialNature,
+              Number(newItem.debitAmount || 0),
+              Number(newItem.creditAmount || 0),
+              newItem.initialNature
+            );
+            newItem.finalBalance = calculated.balance;
+            newItem.finalNature = calculated.nature;
+          }
+          return newItem;
         }
         return item;
       });
@@ -258,12 +269,17 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const balanceSheet = AccountingEngine.calculateBalanceSheet(balances);
 
   const formatPeriodText = (startDate?: string, endDate?: string): string => {
-    const start = startDate || period.startDate;
-    const end = endDate || period.endDate;
-    if (!start || !end) return '';
-    const [y1, m1, d1] = start.split('-');
-    const [y2, m2, d2] = end.split('-');
-    return `${d1}/${m1}/${y1} a ${d2}/${m2}/${y2}`;
+    const s = startDate || period.startDate;
+    const e = endDate || period.endDate;
+    if (!s || !e) return '01/01/2024 a 31/12/2024';
+
+    const formatSafe = (d: string) => {
+      if (d.includes('/')) return d;
+      const p = d.split('-');
+      return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : d;
+    };
+
+    return `${formatSafe(s)} a ${formatSafe(e)}`;
   };
 
   const saveCurrentBalances = async (): Promise<string> => {

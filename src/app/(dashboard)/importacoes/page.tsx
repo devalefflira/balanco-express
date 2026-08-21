@@ -6,7 +6,7 @@ import { useAccounting } from '@/domain/context/AccountingContext';
 import { AccountingParser, ParsedAccountingData } from '@/domain/services/AccountingParser';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { formatCurrency } from '@/lib/formatters';
-import { UploadCloud, FileText, ArrowRight, RefreshCw, AlertCircle } from 'lucide-react';
+import { UploadCloud, FileSpreadsheet, ArrowRight, RefreshCw, AlertCircle } from 'lucide-react';
 
 export default function ImportacoesPage() {
   const router = useRouter();
@@ -25,7 +25,14 @@ export default function ImportacoesPage() {
     setIsProcessing(true);
 
     try {
-      if (file.type === 'application/pdf') {
+      const fileName = file.name.toLowerCase();
+
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        const buffer = await file.arrayBuffer();
+        const parsed = AccountingParser.parseExcelBuffer(buffer);
+        setParsedData(parsed);
+        setRawText(`[Balancete Analítico Excel Carregado: ${file.name}]`);
+      } else if (fileName.endsWith('.pdf')) {
         const formData = new FormData();
         formData.append('file', file);
 
@@ -41,7 +48,6 @@ export default function ImportacoesPage() {
 
         const data = await res.json();
         setRawText(data.text);
-        
         const parsed = AccountingParser.parseRawText(data.text);
         setParsedData(parsed);
       } else {
@@ -59,7 +65,7 @@ export default function ImportacoesPage() {
 
   const handleManualProcess = () => {
     if (!rawText.trim()) {
-      setErrorMessage('Cole ou envie o texto do relatório antes de processar.');
+      setErrorMessage('Cole ou envie o texto do demonstrativo antes de processar.');
       return;
     }
     setErrorMessage(null);
@@ -94,11 +100,11 @@ export default function ImportacoesPage() {
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div>
         <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">
-          <UploadCloud className="w-6 h-6 text-blue-600" />
-          Importação de Balanços e Balancetes
+          <FileSpreadsheet className="w-6 h-6 text-emerald-600" />
+          Importação de Balancete Analítico
         </h1>
         <p className="text-xs text-gray-500">
-          Envie o PDF ou cole o texto do demonstrativo para extrair automaticamente o período, contas e saldos.
+          Envie o Balancete Analítico (.xlsx, .xls ou .pdf) para alimentar simultaneamente o Balanço Patrimonial, Balancete e DRE.
         </p>
       </div>
 
@@ -111,15 +117,15 @@ export default function ImportacoesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
-          <h2 className="text-sm font-bold text-gray-800">1. Arquivo ou Conteúdo do Relatório</h2>
+          <h2 className="text-sm font-bold text-gray-800">1. Arquivo do Balancete</h2>
 
-          <label className="border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-xl p-8 flex flex-col items-center justify-center gap-2 cursor-pointer bg-gray-50/50 hover:bg-blue-50/30 transition">
-            <UploadCloud className="w-8 h-8 text-blue-600" />
-            <span className="text-xs font-bold text-gray-700">Selecione o arquivo PDF ou TXT</span>
+          <label className="border-2 border-dashed border-emerald-300 hover:border-emerald-500 rounded-xl p-8 flex flex-col items-center justify-center gap-2 cursor-pointer bg-emerald-50/20 hover:bg-emerald-50/50 transition">
+            <UploadCloud className="w-8 h-8 text-emerald-600" />
+            <span className="text-xs font-bold text-gray-700">Selecione o Balancete (.xlsx, .xls ou .pdf)</span>
             <span className="text-[11px] text-gray-400">ou arraste e solte aqui</span>
             <input
               type="file"
-              accept=".pdf,.txt"
+              accept=".xlsx,.xls,.pdf,.txt"
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -127,14 +133,14 @@ export default function ImportacoesPage() {
 
           <div className="space-y-1">
             <label className="text-[11px] font-semibold text-gray-600">
-              Ou cole o texto do Balanço / Balancete:
+              Ou cole o texto do Balancete Analítico:
             </label>
             <textarea
               rows={8}
               value={rawText}
               onChange={(e) => setRawText(e.target.value)}
-              placeholder="Cole aqui o texto extraído do demonstrativo..."
-              className="w-full p-3 border rounded-xl font-mono text-[11px] bg-white focus:ring-1 focus:ring-blue-500"
+              placeholder="Cole o texto do Balancete aqui..."
+              className="w-full p-3 border rounded-xl font-mono text-[11px] bg-white focus:ring-1 focus:ring-emerald-500"
             />
           </div>
 
@@ -143,50 +149,46 @@ export default function ImportacoesPage() {
             disabled={isProcessing}
             className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition"
           >
-            {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-            Processar e Mapear Dados
+            {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            Processar Balancete
           </button>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
-            <h2 className="text-sm font-bold text-gray-800">2. Prévia dos Dados Identificados</h2>
+            <h2 className="text-sm font-bold text-gray-800">2. Prévia dos Demonstrativos Gerados</h2>
 
             {parsedData ? (
               <div className="space-y-3 text-xs">
-                <div className="p-4 bg-blue-50/60 border border-blue-100 rounded-xl space-y-1">
-                  <p className="font-bold text-blue-950">{parsedData.company.corporateName}</p>
-                  <p className="text-[11px] text-blue-800">CNPJ: {parsedData.company.cnpj}</p>
-                  <p className="text-[11px] text-blue-800">
+                <div className="p-4 bg-emerald-50/60 border border-emerald-100 rounded-xl space-y-1">
+                  <p className="font-bold text-emerald-950">{parsedData.company.corporateName}</p>
+                  <p className="text-[11px] text-emerald-800">CNPJ: {parsedData.company.cnpj}</p>
+                  <p className="text-[11px] text-emerald-800">
                     Período: {parsedData.period.startDate.split('-').reverse().join('/')} a {parsedData.period.endDate.split('-').reverse().join('/')}
                   </p>
                 </div>
 
                 <div className="p-3 bg-gray-50 border rounded-xl space-y-1 text-[11px] text-gray-600">
-                  <p><span className="font-semibold text-gray-800">Total de Contas Preenchidas:</span> {filledAccounts.length} contas com valor</p>
-                  <p><span className="font-semibold text-gray-800">Responsável:</span> {parsedData.accountant?.name || 'Não identificado'}</p>
-                  <p><span className="font-semibold text-gray-800">Origem da gravação:</span> <span className="text-purple-600 font-bold">Importado</span></p>
+                  <p><span className="font-semibold text-gray-800">Total de Contas Processadas:</span> {filledAccounts.length} contas</p>
+                  <p><span className="font-semibold text-gray-800">Demonstrativos Gerados:</span> Balanço Patrimonial, Balancete e DRE</p>
                 </div>
 
                 <div className="border rounded-xl p-3 bg-white space-y-2">
                   <p className="font-bold text-gray-800 text-[11px]">Amostra de Saldos Identificados:</p>
                   <div className="max-h-40 overflow-y-auto divide-y divide-gray-100 font-mono text-[11px]">
-                    {filledAccounts.slice(0, 5).map((item: AccountingBalance) => (
+                    {filledAccounts.slice(0, 6).map((item: AccountingBalance) => (
                       <div key={item.codeReduced} className="py-1 flex justify-between">
                         <span className="text-gray-600">{item.description}</span>
                         <span className="font-bold text-gray-900">{formatCurrency(item.finalBalance)} {item.finalNature}</span>
                       </div>
                     ))}
                   </div>
-                  {filledAccounts.length > 5 && (
-                    <p className="text-[10px] text-gray-400 pt-1">+{filledAccounts.length - 5} outras contas</p>
-                  )}
                 </div>
               </div>
             ) : (
               <div className="p-8 text-center text-gray-400 text-xs flex flex-col items-center justify-center gap-2 border border-dashed rounded-xl h-64">
-                <FileText className="w-8 h-8 opacity-40" />
-                <span>Nenhum dado importado ainda. Selecione um arquivo ao lado.</span>
+                <FileSpreadsheet className="w-8 h-8 opacity-40" />
+                <span>Envie o Balancete Analítico para gerar os 3 relatórios automaticamente.</span>
               </div>
             )}
           </div>
@@ -194,16 +196,9 @@ export default function ImportacoesPage() {
           <button
             onClick={handleConfirmImport}
             disabled={!parsedData || contextLoading}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow transition"
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow transition"
           >
-            {contextLoading ? (
-              'Salvando em Lançamentos...'
-            ) : (
-              <>
-                Confirmar e Salvar em Lançamentos
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
+            {contextLoading ? 'Salvando em Lançamentos...' : <>Confirmar e Gerar Relatórios <ArrowRight className="w-4 h-4" /></>}
           </button>
         </div>
       </div>

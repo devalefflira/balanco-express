@@ -10,7 +10,7 @@ export interface DREResult {
   operatingExpenses: Decimal;
   financialExpenses: Decimal;
   nonOperatingRevenue: Decimal;
-  netIncome: Decimal; // Lucro ou Prejuízo Líquido
+  netIncome: Decimal;
 }
 
 export interface BalanceSheetResult {
@@ -23,13 +23,10 @@ export interface BalanceSheetResult {
   equity: Decimal;
   dreResult: DREResult;
   isBalanced: boolean;
-  discrepancy: Decimal; // Diferença entre Ativo e (Passivo + PL)
+  discrepancy: Decimal;
 }
 
 export class AccountingEngine {
-  /**
-   * Calcula o Saldo Atual/Final com base na natureza da conta (D ou C)
-   */
   public static calculateFinalBalance(
     initialBalance: number,
     initialNature: 'D' | 'C',
@@ -62,9 +59,6 @@ export class AccountingEngine {
     }
   }
 
-  /**
-   * Apura a DRE a partir dos saldos analíticos
-   */
   public static calculateDRE(balances: AccountingBalance[]): DREResult {
     let grossRevenue = new Decimal(0);
     let deductions = new Decimal(0);
@@ -78,28 +72,17 @@ export class AccountingEngine {
     for (const item of analytical) {
       const val = new Decimal(item.finalBalance || 0);
 
-      // Receita Bruta (3.1)
       if (item.classification.startsWith('3-1')) {
         grossRevenue = grossRevenue.plus(val);
-      }
-      // Deduções de Venda (3-2-01)
-      else if (item.classification.startsWith('3-2-01')) {
+      } else if (item.classification.startsWith('3-2-01')) {
         deductions = deductions.plus(val);
-      }
-      // CMV / Custos (3-2-03)
-      else if (item.classification.startsWith('3-2-03')) {
+      } else if (item.classification.startsWith('3-2-03')) {
         costOfGoodsSold = costOfGoodsSold.plus(val);
-      }
-      // Receitas Não Operacionais / Bonificações (3-5)
-      else if (item.classification.startsWith('3-5') || item.classification.startsWith('3-3')) {
+      } else if (item.classification.startsWith('3-5') || item.classification.startsWith('3-3')) {
         nonOperatingRevenue = nonOperatingRevenue.plus(val);
-      }
-      // Despesas Financeiras (4-2)
-      else if (item.classification.startsWith('4-2')) {
+      } else if (item.classification.startsWith('4-2')) {
         financialExpenses = financialExpenses.plus(val);
-      }
-      // Outras Despesas Operacionais (4-1)
-      else if (item.classification.startsWith('4-1')) {
+      } else if (item.classification.startsWith('4-1')) {
         operatingExpenses = operatingExpenses.plus(val);
       }
     }
@@ -107,8 +90,6 @@ export class AccountingEngine {
     const netRevenue = grossRevenue.minus(deductions);
     const grossProfit = netRevenue.minus(costOfGoodsSold);
     const totalExpenses = operatingExpenses.plus(financialExpenses);
-    
-    // Lucro Líquido = Lucro Bruto + Outras Receitas - Despesas Operacionais - Despesas Financeiras
     const netIncome = grossProfit.plus(nonOperatingRevenue).minus(totalExpenses);
 
     return {
@@ -124,9 +105,6 @@ export class AccountingEngine {
     };
   }
 
-  /**
-   * Apura o Balanço Patrimonial e valida a igualdade Ativo = Passivo + PL
-   */
   public static calculateBalanceSheet(balances: AccountingBalance[]): BalanceSheetResult {
     let currentAssets = new Decimal(0);
     let nonCurrentAssets = new Decimal(0);
@@ -137,44 +115,38 @@ export class AccountingEngine {
     const analytical = balances.filter(b => b.accountType === 'ANALITICA');
     const dreResult = this.calculateDRE(balances);
 
+    const hasRecordedPeriodResult = analytical.some(
+      b => b.classification.startsWith('2-4-08') && (b.finalBalance || 0) > 0
+    );
+
     for (const item of analytical) {
       const val = new Decimal(item.finalBalance || 0);
 
-      // 1-1 Ativo Circulante
       if (item.classification.startsWith('1-1')) {
-        // Se a conta for credora redutora (ex: Depreciação ou duplicatas descontadas)
         if (item.finalNature === 'C') {
           currentAssets = currentAssets.minus(val);
         } else {
           currentAssets = currentAssets.plus(val);
         }
-      }
-      // 1-2 Ativo Não Circulante (Imobilizado / Depreciação)
-      else if (item.classification.startsWith('1-2')) {
+      } else if (item.classification.startsWith('1-2')) {
         if (item.finalNature === 'C') {
           nonCurrentAssets = nonCurrentAssets.minus(val);
         } else {
           nonCurrentAssets = nonCurrentAssets.plus(val);
         }
-      }
-      // 2-1 Passivo Circulante
-      else if (item.classification.startsWith('2-1')) {
+      } else if (item.classification.startsWith('2-1')) {
         if (item.finalNature === 'D') {
           currentLiabilities = currentLiabilities.minus(val);
         } else {
           currentLiabilities = currentLiabilities.plus(val);
         }
-      }
-      // 2-2 Passivo Não Circulante
-      else if (item.classification.startsWith('2-2')) {
+      } else if (item.classification.startsWith('2-2')) {
         if (item.finalNature === 'D') {
           nonCurrentLiabilities = nonCurrentLiabilities.minus(val);
         } else {
           nonCurrentLiabilities = nonCurrentLiabilities.plus(val);
         }
-      }
-      // 2-4 Patrimônio Líquido
-      else if (item.classification.startsWith('2-4')) {
+      } else if (item.classification.startsWith('2-4')) {
         if (item.finalNature === 'D') {
           equity = equity.minus(val);
         } else {
@@ -185,9 +157,7 @@ export class AccountingEngine {
 
     const totalAssets = currentAssets.plus(nonCurrentAssets);
     const totalLiabilities = currentLiabilities.plus(nonCurrentLiabilities);
-
-    // O Resultado do Exercício é somado ao PL caso ainda não tenha sido registrado manualmente
-    const totalEquity = equity.plus(dreResult.netIncome);
+    const totalEquity = hasRecordedPeriodResult ? equity : equity.plus(dreResult.netIncome);
 
     const totalLiabilitiesAndEquity = totalLiabilities.plus(totalEquity);
     const discrepancy = totalAssets.minus(totalLiabilitiesAndEquity);

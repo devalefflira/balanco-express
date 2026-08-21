@@ -45,7 +45,9 @@ export const BalancoReport: React.FC<BalancoReportProps> = ({
           </div>
           <div className="text-right font-semibold">
             <p className="text-sm font-bold">Balanço Patrimonial</p>
-            <p>Período: {periodText}</p>
+            <p>
+              Período: {periodText || `Exercício ${company.nireDate ? '01/01/2024 a 31/12/2024' : ''}`}
+            </p>
           </div>
         </div>
       </div>

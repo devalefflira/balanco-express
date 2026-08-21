@@ -1,5 +1,6 @@
 import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
+import * as XLSX from 'xlsx';
 
 export interface ParsedAccountingData {
   company: {
@@ -22,10 +23,14 @@ export interface ParsedAccountingData {
 }
 
 export class AccountingParser {
-  public static parseCurrency(str: string): { amount: number; nature: 'D' | 'C' } {
-    if (!str) return { amount: 0, nature: 'D' };
+  public static parseCurrency(val: any): { amount: number; nature: 'D' | 'C' } {
+    if (val === null || val === undefined) return { amount: 0, nature: 'D' };
 
-    let clean = str.trim().replace(/[*()=]/g, '');
+    if (typeof val === 'number') {
+      return { amount: Math.abs(val), nature: val < 0 ? 'C' : 'D' };
+    }
+
+    let clean = String(val).trim().replace(/[*()=]/g, '');
     let nature: 'D' | 'C' = 'D';
 
     const upper = clean.toUpperCase();
@@ -54,6 +59,118 @@ export class AccountingParser {
     return { amount, nature };
   }
 
+  public static parseExcelBuffer(buffer: ArrayBuffer): ParsedAccountingData {
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rawMatrix: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    let corporateName = 'JC MACHADO DIAS';
+    let cnpj = '24.905.673/0001-59';
+    let nire = '21201532287';
+    let nireDate = '2016-05-31';
+    let accountantName = 'JAMAILA FONSECA LOPES COSTA';
+    let crc = '0124650';
+    let startDate = '2024-01-01';
+    let endDate = '2024-12-31';
+    let description = 'Exercício 01/01/2024 a 31/12/2024';
+
+    const balanceteMap = new Map<number, { initial: number; initialNat: 'D' | 'C'; deb: number; cred: number; final: number; finalNat: 'D' | 'C' }>();
+    const valueCurrencyRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
+
+    for (const row of rawMatrix) {
+      const rowStr = row.join(' ');
+
+      if (rowStr.includes('CNPJ')) {
+        const m = rowStr.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
+        if (m) cnpj = m[0];
+      }
+      if (rowStr.includes('NIRE')) {
+        const m = rowStr.match(/NIRE:\s*(\d+)/i);
+        if (m) nire = m[1];
+      }
+      const dMatch = rowStr.match(/(\d{2}\/\d{2}\/\d{4})\s*(?:a|até|-)\s*(\d{2}\/\d{2}\/\d{4})/i);
+      if (dMatch) {
+        const [d1, m1, y1] = dMatch[1].split('/');
+        const [d2, m2, y2] = dMatch[2].split('/');
+        startDate = `${y1}-${m1}-${d1}`;
+        endDate = `${y2}-${m2}-${d2}`;
+        description = `Exercício ${dMatch[1]} a ${dMatch[2]}`;
+      }
+
+      const codeMatch = rowStr.match(/\[(\d+)\]/);
+      if (codeMatch) {
+        const code = parseInt(codeMatch[1], 10);
+        const numbers = rowStr.match(valueCurrencyRegex);
+        if (numbers && numbers.length >= 4) {
+          const init = this.parseCurrency(numbers[0]);
+          const deb = this.parseCurrency(numbers[1]);
+          const cred = this.parseCurrency(numbers[2]);
+          const fin = this.parseCurrency(numbers[3]);
+          balanceteMap.set(code, {
+            initial: init.amount,
+            initialNat: init.nature,
+            deb: deb.amount,
+            cred: cred.amount,
+            final: fin.amount,
+            finalNat: fin.nature,
+          });
+        }
+      }
+    }
+
+    const balances: AccountingBalance[] = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
+      let initialBalance = 0;
+      let initialNature: 'D' | 'C' = acc.nature;
+      let debitAmount = 0;
+      let creditAmount = 0;
+      let finalBalance = 0;
+      let finalNature: 'D' | 'C' = acc.nature;
+
+      const found = balanceteMap.get(acc.codeReduced);
+      if (found) {
+        initialBalance = found.initial;
+        initialNature = found.initialNat;
+        debitAmount = found.deb;
+        creditAmount = found.cred;
+
+        if (acc.statementGroup === 'RECEITA') {
+          finalBalance = found.cred > 0 ? found.cred : found.deb;
+          finalNature = 'C';
+        } else if (acc.statementGroup === 'CUSTO' || acc.statementGroup === 'DESPESA') {
+          finalBalance = found.deb > 0 ? found.deb : found.cred;
+          finalNature = 'D';
+        } else {
+          finalBalance = found.final;
+          finalNature = found.finalNat;
+        }
+      }
+
+      return {
+        periodId: 'imported-temp',
+        accountId: String(acc.codeReduced),
+        classification: acc.classification,
+        description: acc.description,
+        codeReduced: acc.codeReduced,
+        statementGroup: acc.statementGroup,
+        accountType: acc.accountType,
+        initialBalance,
+        initialNature,
+        debitAmount,
+        creditAmount,
+        finalBalance,
+        finalNature,
+      };
+    });
+
+    return {
+      company: { corporateName, cnpj, nire, nireDate },
+      accountant: { name: accountantName, crc },
+      period: { description, startDate, endDate },
+      balances,
+    };
+  }
+
   public static parseRawText(rawText: string): ParsedAccountingData {
     const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
@@ -63,9 +180,9 @@ export class AccountingParser {
     let nireDate = '2016-05-31';
     let accountantName = 'JAMAILA FONSECA LOPES COSTA';
     let crc = '0124650';
-    let startDate = '2025-01-01';
-    let endDate = '2025-12-31';
-    let description = 'Exercício 01/01/2025 a 31/12/2025';
+    let startDate = '2024-01-01';
+    let endDate = '2024-12-31';
+    let description = 'Exercício 01/01/2024 a 31/12/2024';
 
     for (const line of rawLines) {
       if (line.includes('CNPJ:')) {
@@ -76,12 +193,13 @@ export class AccountingParser {
         const m = line.match(/NIRE:\s*(\d+)/i);
         if (m) nire = m[1];
       }
-      const dMatch = line.match(/(\d{2})\/(\d{2})\/(\d{4})\s*(?:a|até|-)\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+      const dMatch = line.match(/(\d{2}\/\d{2}\/\d{4})\s*(?:a|até|-)\s*(\d{2}\/\d{2}\/\d{4})/i);
       if (dMatch) {
-        const [, d1, m1, y1, d2, m2, y2] = dMatch;
+        const [d1, m1, y1] = dMatch[1].split('/');
+        const [d2, m2, y2] = dMatch[2].split('/');
         startDate = `${y1}-${m1}-${d1}`;
         endDate = `${y2}-${m2}-${d2}`;
-        description = `Exercício ${d1}/${m1}/${y1} a ${d2}/${m2}/${y2}`;
+        description = `Exercício ${dMatch[1]} a ${dMatch[2]}`;
       }
       if (line.includes('CRC:')) {
         const m = line.match(/CRC:\s*([A-Za-z0-9]+)/i);
@@ -89,17 +207,11 @@ export class AccountingParser {
       }
     }
 
-    const isBalancete = rawLines.some((l) => l.toLowerCase().includes('balancete'));
     const valueCurrencyRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
-
-    const valuesByCode = new Map<number, { amount: number; nature: 'D' | 'C' }>();
-    const valuesByClass = new Map<string, { amount: number; nature: 'D' | 'C' }>();
     const balanceteMap = new Map<number, { initial: number; initialNat: 'D' | 'C'; deb: number; cred: number; final: number; finalNat: 'D' | 'C' }>();
 
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i];
-
-      // Balancete: [código]
       const bMatch = line.match(/\[(\d+)\]/);
       if (bMatch) {
         const code = parseInt(bMatch[1], 10);
@@ -116,58 +228,33 @@ export class AccountingParser {
           });
         }
       }
-
-      // DRE: Classificação (3-x ou 4-x) + Código Reduzido + Valor
-      const dreMatch = line.match(/([34]-[0-9]+(?:-[0-9]+)*)\s+(\d{3,5})\s+([*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?)/);
-      if (dreMatch) {
-        const cls = dreMatch[1].replace(/\./g, '-');
-        const code = parseInt(dreMatch[2], 10);
-        const val = this.parseCurrency(dreMatch[3]);
-        valuesByClass.set(cls, val);
-        valuesByCode.set(code, val);
-      }
-
-      // Balanço Patrimonial: Classificação
-      const balClassMatch = line.match(/(?:^|\s)(1(?:-[0-9]+)*|2(?:-[0-9]+)*)(?:\s+|$)/);
-      if (balClassMatch) {
-        const cls = balClassMatch[1].replace(/\./g, '-');
-        let valMatches = line.match(valueCurrencyRegex);
-        if (!valMatches || valMatches.length === 0) {
-          const nextBlock = rawLines.slice(i + 1, i + 4).join(' ');
-          valMatches = nextBlock.match(valueCurrencyRegex);
-        }
-        if (valMatches && valMatches.length > 0) {
-          valuesByClass.set(cls, this.parseCurrency(valMatches[0]));
-        }
-      }
     }
 
     const balances: AccountingBalance[] = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
-      let finalBalance = 0;
-      let finalNature: 'D' | 'C' = acc.nature;
-      let debitAmount = 0;
-      let creditAmount = 0;
       let initialBalance = 0;
       let initialNature: 'D' | 'C' = acc.nature;
+      let debitAmount = 0;
+      let creditAmount = 0;
+      let finalBalance = 0;
+      let finalNature: 'D' | 'C' = acc.nature;
 
-      const normClass = acc.classification.replace(/\./g, '-');
+      const found = balanceteMap.get(acc.codeReduced);
+      if (found) {
+        initialBalance = found.initial;
+        initialNature = found.initialNat;
+        debitAmount = found.deb;
+        creditAmount = found.cred;
 
-      if (isBalancete && balanceteMap.has(acc.codeReduced)) {
-        const b = balanceteMap.get(acc.codeReduced)!;
-        initialBalance = b.initial;
-        initialNature = b.initialNat;
-        debitAmount = b.deb;
-        creditAmount = b.cred;
-        finalBalance = b.final;
-        finalNature = b.finalNat;
-      } else if (valuesByCode.has(acc.codeReduced)) {
-        const v = valuesByCode.get(acc.codeReduced)!;
-        finalBalance = v.amount;
-        finalNature = v.nature;
-      } else if (valuesByClass.has(normClass)) {
-        const v = valuesByClass.get(normClass)!;
-        finalBalance = v.amount;
-        finalNature = v.nature;
+        if (acc.statementGroup === 'RECEITA') {
+          finalBalance = found.cred > 0 ? found.cred : found.deb;
+          finalNature = 'C';
+        } else if (acc.statementGroup === 'CUSTO' || acc.statementGroup === 'DESPESA') {
+          finalBalance = found.deb > 0 ? found.deb : found.cred;
+          finalNature = 'D';
+        } else {
+          finalBalance = found.final;
+          finalNature = found.finalNat;
+        }
       }
 
       return {

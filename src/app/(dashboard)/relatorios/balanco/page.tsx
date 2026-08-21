@@ -1,42 +1,52 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { BalancoReport } from '@/components/reports/BalancoReport';
 import { ReportPeriodSelector } from '@/components/reports/ReportPeriodSelector';
 import { Printer, ArrowLeft } from 'lucide-react';
-import Link from 'next/link';
 
 export default function BalancoPage() {
-  const { company, accountant, balances, formatPeriodText } = useAccounting();
+  const { company, accountant, period, balances, formatPeriodText } = useAccounting();
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const periodText = `Exercício de ${formatPeriodText(period.startDate, period.endDate)}`;
 
   return (
-    <div className="p-8 space-y-6 max-w-5xl mx-auto">
-      <div className="flex justify-between items-center print:hidden">
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
         <Link
           href="/lancamentos-salvos"
-          className="flex items-center gap-2 text-xs font-semibold text-gray-600 hover:text-blue-600 transition"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-900 transition"
         >
           <ArrowLeft className="w-4 h-4" />
           Ver Lançamentos Salvos
         </Link>
         <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg shadow-sm transition"
+          onClick={handlePrint}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow transition"
         >
           <Printer className="w-4 h-4" />
           Imprimir Balanço (PDF)
         </button>
       </div>
 
-      <ReportPeriodSelector />
+      <div className="print:hidden">
+        <ReportPeriodSelector />
+      </div>
 
-      <BalancoReport
-        company={company}
-        accountant={accountant}
-        periodText={formatPeriodText('balance')}
-        balances={balances}
-      />
+      <div className="bg-white rounded-2xl border shadow-sm print:border-none print:shadow-none">
+        <BalancoReport
+          company={company}
+          accountant={accountant}
+          periodText={periodText}
+          balances={balances}
+        />
+      </div>
     </div>
   );
 }
