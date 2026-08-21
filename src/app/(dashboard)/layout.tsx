@@ -34,7 +34,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <AccountingProvider>
-      <div className="flex h-screen bg-gray-100 font-sans">
+      <div className="flex h-screen bg-gray-100 font-sans print:h-auto print:bg-white">
         <aside className="w-64 bg-slate-900 text-white flex flex-col justify-between shadow-lg print:hidden">
           <div>
             <div className="p-5 border-b border-slate-800">
@@ -75,7 +75,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto print:h-auto print:overflow-visible">
           {children}
         </main>
       </div>

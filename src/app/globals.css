@@ -24,3 +24,78 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* =========================================================
+   REGRAS DE IMPRESSÃO CONTÁBIL / EXPORTAÇÃO PDF
+   ========================================================= */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm 10mm 10mm 10mm;
+  }
+
+  html, 
+  body {
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 9pt;
+  }
+
+  /* Desfaz o container flex-h-screen do layout principal para permitir paginação contínua */
+  body > div,
+  #__next,
+  main {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Oculta toda a interface de navegação e botões */
+  aside,
+  header,
+  nav,
+  button,
+  select,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Garante cores nítidas e linhas de grade contábeis */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Evita quebras indesejadas de linhas de tabelas */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  /* Bloco de assinaturas não quebra no meio */
+  .signature-block,
+  .print\:break-inside-avoid {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}

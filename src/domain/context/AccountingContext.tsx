@@ -134,6 +134,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const recalculateTree = (items: AccountingBalance[]): AccountingBalance[] => {
     const list = items.map((b) => ({ ...b }));
+
     const synthetics = list
       .filter((b) => b.accountType === 'SINTETICA')
       .sort((a, b) => b.classification.length - a.classification.length);
@@ -156,10 +157,19 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         totalCredit += child.creditAmount || 0;
         totalInitial += child.initialBalance || 0;
 
-        if (syn.finalNature === child.finalNature) {
-          totalFinal += child.finalBalance || 0;
+        // Se a conta analítica possui a mesma natureza da sintética, SOMA; se for contrária (C no Ativo ou D no Passivo), SUBTRAI
+        if (syn.statementGroup === 'ATIVO') {
+          if (child.finalNature === 'D') {
+            totalFinal += child.finalBalance || 0;
+          } else {
+            totalFinal -= child.finalBalance || 0;
+          }
         } else {
-          totalFinal -= child.finalBalance || 0;
+          if (child.finalNature === 'C') {
+            totalFinal += child.finalBalance || 0;
+          } else {
+            totalFinal -= child.finalBalance || 0;
+          }
         }
       }
 
@@ -169,7 +179,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         target.creditAmount = totalCredit;
         target.initialBalance = totalInitial;
         target.finalBalance = Math.abs(totalFinal);
-        target.finalNature = totalFinal < 0 ? (syn.finalNature === 'D' ? 'C' : 'D') : syn.finalNature;
+        target.finalNature = totalFinal < 0 ? (syn.statementGroup === 'ATIVO' ? 'C' : 'D') : (syn.statementGroup === 'ATIVO' ? 'D' : 'C');
       }
     }
 

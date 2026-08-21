@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { formatCurrency } from '@/lib/formatters';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { CheckCircle2, AlertTriangle, Wand2, Calendar, RotateCcw, Save, Check } from 'lucide-react';
 
 export default function LancamentosPage() {
@@ -177,19 +178,10 @@ export default function LancamentosPage() {
                     </td>
                     <td className="p-2 text-right">
                       {!isSynthetic ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.initialBalance || ''}
-                          onChange={(e) =>
-                            updateBalance(
-                              item.codeReduced,
-                              'initialBalance',
-                              parseFloat(e.target.value) || 0
-                            )
-                          }
-                          placeholder="0,00"
-                          className="w-full text-right p-1.5 border rounded focus:ring-1 focus:ring-blue-500 font-mono"
+                        <CurrencyInput
+                          value={item.initialBalance}
+                          onChange={(val) => updateBalance(item.codeReduced, 'initialBalance', val)}
+                          className="w-full"
                         />
                       ) : (
                         <span className="font-mono text-gray-500">
@@ -199,19 +191,10 @@ export default function LancamentosPage() {
                     </td>
                     <td className="p-2 text-right">
                       {!isSynthetic ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.debitAmount || ''}
-                          onChange={(e) =>
-                            updateBalance(
-                              item.codeReduced,
-                              'debitAmount',
-                              parseFloat(e.target.value) || 0
-                            )
-                          }
-                          placeholder="0,00"
-                          className="w-full text-right p-1.5 border rounded focus:ring-1 focus:ring-blue-500 font-mono"
+                        <CurrencyInput
+                          value={item.debitAmount}
+                          onChange={(val) => updateBalance(item.codeReduced, 'debitAmount', val)}
+                          className="w-full"
                         />
                       ) : (
                         <span className="font-mono text-gray-500">{formatCurrency(item.debitAmount)}</span>
@@ -219,19 +202,10 @@ export default function LancamentosPage() {
                     </td>
                     <td className="p-2 text-right">
                       {!isSynthetic ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.creditAmount || ''}
-                          onChange={(e) =>
-                            updateBalance(
-                              item.codeReduced,
-                              'creditAmount',
-                              parseFloat(e.target.value) || 0
-                            )
-                          }
-                          placeholder="0,00"
-                          className="w-full text-right p-1.5 border rounded focus:ring-1 focus:ring-blue-500 font-mono"
+                        <CurrencyInput
+                          value={item.creditAmount}
+                          onChange={(val) => updateBalance(item.codeReduced, 'creditAmount', val)}
+                          className="w-full"
                         />
                       ) : (
                         <span className="font-mono text-gray-500">{formatCurrency(item.creditAmount)}</span>
@@ -239,19 +213,10 @@ export default function LancamentosPage() {
                     </td>
                     <td className="p-2 text-right font-mono font-semibold">
                       {!isSynthetic ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.finalBalance || ''}
-                          onChange={(e) =>
-                            updateBalance(
-                              item.codeReduced,
-                              'finalBalance',
-                              parseFloat(e.target.value) || 0
-                            )
-                          }
-                          placeholder="0,00"
-                          className="w-full text-right p-1.5 border border-blue-200 bg-blue-50/30 rounded font-mono font-bold"
+                        <CurrencyInput
+                          value={item.finalBalance}
+                          onChange={(val) => updateBalance(item.codeReduced, 'finalBalance', val)}
+                          className="w-full border-blue-200 bg-blue-50/30 font-bold"
                         />
                       ) : (
                         <span className="text-slate-800">

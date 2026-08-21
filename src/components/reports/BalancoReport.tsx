@@ -33,7 +33,7 @@ export const BalancoReport: React.FC<BalancoReportProps> = ({
   const liabilityBalances = balances.filter(b => b.classification.startsWith('2'));
 
   return (
-    <div className="max-w-4xl mx-auto bg-white p-8 font-sans text-xs text-gray-900 border shadow-sm print:border-none print:shadow-none">
+    <div className="max-w-4xl mx-auto bg-white p-8 font-sans text-xs text-gray-900 border shadow-sm print:border-none print:shadow-none print:p-0 print:max-w-full">
       {/* Cabeçalho */}
       <div className="border-b-2 border-black pb-3 mb-4">
         <div className="flex justify-between items-start">
@@ -66,7 +66,7 @@ export const BalancoReport: React.FC<BalancoReportProps> = ({
               {assetBalances.map((item, idx) => {
                 const isSynthetic = item.accountType === 'SINTETICA';
                 return (
-                  <tr key={idx} className={`border-b border-gray-100 ${isSynthetic ? 'font-bold bg-gray-50/70' : ''}`}>
+                  <tr key={idx} className={`border-b border-gray-100 print:break-inside-avoid ${isSynthetic ? 'font-bold bg-gray-50/70' : ''}`}>
                     <td className="py-1 pl-1" style={{ paddingLeft: `${(item.classification.split('-').length - 1) * 12}px` }}>
                       {item.description}
                     </td>
@@ -95,7 +95,7 @@ export const BalancoReport: React.FC<BalancoReportProps> = ({
               {liabilityBalances.map((item, idx) => {
                 const isSynthetic = item.accountType === 'SINTETICA';
                 return (
-                  <tr key={idx} className={`border-b border-gray-100 ${isSynthetic ? 'font-bold bg-gray-50/70' : ''}`}>
+                  <tr key={idx} className={`border-b border-gray-100 print:break-inside-avoid ${isSynthetic ? 'font-bold bg-gray-50/70' : ''}`}>
                     <td className="py-1 pl-1" style={{ paddingLeft: `${(item.classification.split('-').length - 1) * 12}px` }}>
                       {item.description}
                     </td>
@@ -112,12 +112,14 @@ export const BalancoReport: React.FC<BalancoReportProps> = ({
       </div>
 
       {/* Assinaturas */}
-      <ReportSignatures
-        representativeName={company.representativeName}
-        representativeCpf={company.representativeCpf}
-        accountantName={accountant.name}
-        accountantCrc={accountant.crc}
-      />
+      <div className="print:break-inside-avoid mt-8">
+        <ReportSignatures
+          representativeName={company.representativeName}
+          representativeCpf={company.representativeCpf}
+          accountantName={accountant.name}
+          accountantCrc={accountant.crc}
+        />
+      </div>
     </div>
   );
 };
