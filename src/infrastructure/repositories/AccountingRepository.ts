@@ -10,7 +10,7 @@ export interface SavedPeriodSummary {
   description: string;
   start_date: string;
   end_date: string;
-  status: 'OPEN' | 'IN_PROGRESS' | 'BALANCED' | 'CLOSED';
+  status: 'OPEN' | 'BALANCED' | 'CLOSED';
   source_type: 'MANUAL' | 'IMPORTED';
   created_at: string;
   updated_at?: string;
@@ -108,7 +108,7 @@ export class AccountingRepository {
     return data;
   }
 
-  async updatePeriodStatus(periodId: string, status: 'OPEN' | 'IN_PROGRESS' | 'CLOSED'): Promise<void> {
+  async updatePeriodStatus(periodId: string, status: 'OPEN' | 'BALANCED' | 'CLOSED'): Promise<void> {
     const { error } = await this.supabase
       .from('accounting_periods')
       .update({ status, created_at: new Date().toISOString() })
@@ -128,7 +128,7 @@ export class AccountingRepository {
     endDate: string;
     isBalanced: boolean;
     sourceType?: 'MANUAL' | 'IMPORTED';
-    status?: 'OPEN' | 'IN_PROGRESS' | 'CLOSED';
+    status?: 'OPEN' | 'BALANCED' | 'CLOSED';
     balances: AccountingBalance[];
   }): Promise<string> {
     const {
@@ -158,8 +158,12 @@ export class AccountingRepository {
     let targetPeriodId: string = periodId ?? '';
     const nowIso = new Date().toISOString();
 
-    // Se é uma criação inicial importada, status padrão é OPEN. Se é edição manual, vira IN_PROGRESS
-    const initialStatus = status || (sourceType === 'IMPORTED' && (!periodId || periodId === 'imported-temp') ? 'OPEN' : 'IN_PROGRESS');
+    // Garante que o status seja estritamente compatível com o CHECK constraint do banco
+    const dbStatus: 'OPEN' | 'BALANCED' | 'CLOSED' = status
+      ? status
+      : sourceType === 'IMPORTED' && (!periodId || periodId === 'imported-temp')
+      ? 'OPEN'
+      : 'BALANCED';
 
     if (!targetPeriodId || targetPeriodId === 'current-period' || targetPeriodId === 'imported-temp' || targetPeriodId === 'initial' || targetPeriodId === 'new') {
       const { data: newPeriod, error: periodErr } = await this.supabase
@@ -170,7 +174,7 @@ export class AccountingRepository {
           description,
           start_date: startDate,
           end_date: endDate,
-          status: initialStatus,
+          status: dbStatus,
           source_type: sourceType,
           created_at: nowIso,
         })
@@ -188,7 +192,7 @@ export class AccountingRepository {
           description,
           start_date: startDate,
           end_date: endDate,
-          status: status || 'IN_PROGRESS',
+          status: dbStatus,
           source_type: sourceType,
           created_at: nowIso,
         })
@@ -287,7 +291,6 @@ export class AccountingRepository {
       const missing = allAccounts.filter((a) => !presentCodes.has(a.codeReduced));
       if (missing.length === 0) continue;
 
-      // Garante IDs na tabela chart_of_accounts
       for (const m of missing) {
         const { data: existAcc } = await this.supabase
           .from('chart_of_accounts')
@@ -366,7 +369,7 @@ export class AccountingRepository {
         description: String(item.description || ''),
         start_date: String(item.start_date || ''),
         end_date: String(item.end_date || ''),
-        status: (item.status as any) || 'OPEN',
+        status: (item.status as 'OPEN' | 'BALANCED' | 'CLOSED') || 'OPEN',
         source_type: (item.source_type as any) || 'MANUAL',
         created_at: String(item.created_at || ''),
         updated_at: String(item.created_at || ''),

@@ -41,7 +41,7 @@ export interface AccountingPeriodData {
   description: string;
   startDate: string;
   endDate: string;
-  status: 'OPEN' | 'IN_PROGRESS' | 'BALANCED' | 'CLOSED';
+  status: 'OPEN' | 'BALANCED' | 'CLOSED';
   sourceType: 'MANUAL' | 'IMPORTED';
 }
 
@@ -264,7 +264,6 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const added = await repository.syncAllPeriodsWithChartOfAccounts(customAccounts);
 
-      // Atualiza também a tabela em memória
       const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
       setBalances((prev) => {
         const currentMap = new Map<number, AccountingBalance>();
@@ -308,7 +307,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const togglePeriodClose = async (periodId: string, currentStatus: string) => {
     setIsLoading(true);
     try {
-      const newStatus = currentStatus === 'CLOSED' ? 'IN_PROGRESS' : 'CLOSED';
+      const newStatus: 'OPEN' | 'BALANCED' | 'CLOSED' = currentStatus === 'CLOSED' ? 'BALANCED' : 'CLOSED';
       await repository.updatePeriodStatus(periodId, newStatus);
       if (period.id === periodId) {
         setPeriod((prev) => ({ ...prev, status: newStatus }));
@@ -484,14 +483,14 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         endDate: period.endDate,
         isBalanced: balanceSheet.isBalanced,
         sourceType: period.sourceType,
-        status: period.status === 'CLOSED' ? 'CLOSED' : 'IN_PROGRESS',
+        status: period.status === 'CLOSED' ? 'CLOSED' : 'BALANCED',
         balances,
       });
 
       setPeriod((prev) => ({
         ...prev,
         id: targetPeriodId,
-        status: prev.status === 'CLOSED' ? 'CLOSED' : 'IN_PROGRESS',
+        status: prev.status === 'CLOSED' ? 'CLOSED' : 'BALANCED',
       }));
 
       await refreshSavedPeriods();
