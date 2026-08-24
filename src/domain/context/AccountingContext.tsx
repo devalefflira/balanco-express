@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
+import { ChartAccount } from '@/domain/entities/ChartAccount';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { AccountingEngine, BalanceSheetResult } from '@/domain/services/AccountingEngine';
 import { AutoBalancer, BalancingAction } from '@/domain/services/AutoBalancer';
@@ -59,6 +60,7 @@ export interface ModificationHistoryEntry {
 
 interface AccountingContextType {
   balances: AccountingBalance[];
+  customAccounts: Omit<ChartAccount, 'id' | 'companyId'>[];
   period: AccountingPeriodData;
   company: CompanyData;
   accountant: AccountantData;
@@ -71,6 +73,7 @@ interface AccountingContextType {
   setAccountant: (accountant: AccountantData) => void;
   updateBalance: (codeReduced: number, field: keyof AccountingBalance, value: any) => void;
   recordHistoryEntry: (codeReduced: number, field: string, prevVal: number, newVal: number, snapshot: AccountingBalance[]) => void;
+  addNewAccount: (newAccount: Omit<ChartAccount, 'id' | 'companyId'>) => void;
   applyAutoBalance: () => void;
   undoLastChange: () => void;
   undoAllChanges: () => void;
@@ -132,6 +135,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [history, setHistory] = useState<ModificationHistoryEntry[]>([]);
   const [initialSnapshot, setInitialSnapshot] = useState<AccountingBalance[]>([]);
+  const [customAccounts, setCustomAccounts] = useState<Omit<ChartAccount, 'id' | 'companyId'>[]>([]);
 
   const [balances, setBalances] = useState<AccountingBalance[]>(() => {
     return DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
@@ -245,6 +249,37 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
+  const addNewAccount = (newAccount: Omit<ChartAccount, 'id' | 'companyId'>) => {
+    setCustomAccounts((prev) => [...prev, newAccount]);
+
+    setBalances((prev) => {
+      const exists = prev.some((b) => b.codeReduced === newAccount.codeReduced);
+      if (exists) return prev;
+
+      const newBalanceItem: AccountingBalance = {
+        periodId: period.id || 'current',
+        accountId: String(newAccount.codeReduced),
+        classification: newAccount.classification,
+        description: newAccount.description,
+        codeReduced: newAccount.codeReduced,
+        statementGroup: newAccount.statementGroup,
+        accountType: newAccount.accountType,
+        initialBalance: 0,
+        initialNature: newAccount.nature,
+        debitAmount: 0,
+        creditAmount: 0,
+        finalBalance: 0,
+        finalNature: newAccount.nature,
+      };
+
+      const updatedList = [...prev, newBalanceItem].sort((a, b) => {
+        return a.classification.localeCompare(b.classification, undefined, { numeric: true });
+      });
+
+      return recalculateTree(updatedList);
+    });
+  };
+
   const recordHistoryEntry = (
     codeReduced: number,
     field: string,
@@ -323,7 +358,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const resetBalances = () => {
-    const blank = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
+    const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
+    const blank = allBase.map((acc) => ({
       periodId: 'new',
       accountId: String(acc.codeReduced),
       classification: acc.classification,
@@ -439,7 +475,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       if (data.balances && data.balances.length > 0) {
-        const mappedBalances = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
+        const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
+        const mappedBalances = allBase.map((acc) => {
           const found = data.balances.find((b: any) => b.codeReduced === acc.codeReduced);
           if (found) return found;
           return {
@@ -488,7 +525,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   ): Promise<string> => {
     setIsLoading(true);
     try {
-      const merged = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
+      const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
+      const merged = allBase.map((acc) => {
         const fromImport = importedBalances.find((b) => b.codeReduced === acc.codeReduced);
         const fromCurrent = balances.find((b) => b.codeReduced === acc.codeReduced);
 
@@ -565,6 +603,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     <AccountingContext.Provider
       value={{
         balances,
+        customAccounts,
         period,
         company,
         accountant,
@@ -577,6 +616,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setAccountant,
         updateBalance,
         recordHistoryEntry,
+        addNewAccount,
         applyAutoBalance,
         undoLastChange,
         undoAllChanges,
