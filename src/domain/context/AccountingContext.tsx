@@ -41,7 +41,7 @@ export interface AccountingPeriodData {
   description: string;
   startDate: string;
   endDate: string;
-  status: 'OPEN' | 'BALANCED' | 'CLOSED';
+  status: 'OPEN' | 'IN_PROGRESS' | 'BALANCED' | 'CLOSED';
   sourceType: 'MANUAL' | 'IMPORTED';
 }
 
@@ -74,6 +74,8 @@ interface AccountingContextType {
   updateBalance: (codeReduced: number, field: keyof AccountingBalance, value: any) => void;
   recordHistoryEntry: (codeReduced: number, field: string, prevVal: number, newVal: number, snapshot: AccountingBalance[]) => void;
   addNewAccount: (newAccount: Omit<ChartAccount, 'id' | 'companyId'>) => void;
+  syncChartOfAccounts: () => Promise<number>;
+  togglePeriodClose: (periodId: string, currentStatus: string) => Promise<void>;
   applyAutoBalance: () => void;
   undoLastChange: () => void;
   undoAllChanges: () => void;
@@ -135,7 +137,15 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [history, setHistory] = useState<ModificationHistoryEntry[]>([]);
   const [initialSnapshot, setInitialSnapshot] = useState<AccountingBalance[]>([]);
-  const [customAccounts, setCustomAccounts] = useState<Omit<ChartAccount, 'id' | 'companyId'>[]>([]);
+  const [customAccounts, setCustomAccounts] = useState<Omit<ChartAccount, 'id' | 'companyId'>[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('CUSTOM_CHART_ACCOUNTS');
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) {}
+      }
+    }
+    return [];
+  });
 
   const [balances, setBalances] = useState<AccountingBalance[]>(() => {
     return DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
@@ -249,8 +259,72 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
+  const syncChartOfAccounts = async (): Promise<number> => {
+    setIsLoading(true);
+    try {
+      const added = await repository.syncAllPeriodsWithChartOfAccounts(customAccounts);
+
+      // Atualiza também a tabela em memória
+      const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
+      setBalances((prev) => {
+        const currentMap = new Map<number, AccountingBalance>();
+        prev.forEach((b) => currentMap.set(b.codeReduced, b));
+
+        const mergedList: AccountingBalance[] = allBase.map((acc) => {
+          if (currentMap.has(acc.codeReduced)) {
+            return currentMap.get(acc.codeReduced)!;
+          }
+          return {
+            periodId: period.id || 'current',
+            accountId: String(acc.codeReduced),
+            classification: acc.classification,
+            description: acc.description,
+            codeReduced: acc.codeReduced,
+            statementGroup: acc.statementGroup,
+            accountType: acc.accountType,
+            initialBalance: 0,
+            initialNature: acc.nature,
+            debitAmount: 0,
+            creditAmount: 0,
+            finalBalance: 0,
+            finalNature: acc.nature,
+          };
+        });
+
+        const sorted = mergedList.sort((a, b) =>
+          a.classification.localeCompare(b.classification, undefined, { numeric: true })
+        );
+
+        return recalculateTree(sorted);
+      });
+
+      await refreshSavedPeriods();
+      return added;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const togglePeriodClose = async (periodId: string, currentStatus: string) => {
+    setIsLoading(true);
+    try {
+      const newStatus = currentStatus === 'CLOSED' ? 'IN_PROGRESS' : 'CLOSED';
+      await repository.updatePeriodStatus(periodId, newStatus);
+      if (period.id === periodId) {
+        setPeriod((prev) => ({ ...prev, status: newStatus }));
+      }
+      await refreshSavedPeriods();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const addNewAccount = (newAccount: Omit<ChartAccount, 'id' | 'companyId'>) => {
-    setCustomAccounts((prev) => [...prev, newAccount]);
+    const updatedCustom = [...customAccounts, newAccount];
+    setCustomAccounts(updatedCustom);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('CUSTOM_CHART_ACCOUNTS', JSON.stringify(updatedCustom));
+    }
 
     setBalances((prev) => {
       const exists = prev.some((b) => b.codeReduced === newAccount.codeReduced);
@@ -272,9 +346,9 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         finalNature: newAccount.nature,
       };
 
-      const updatedList = [...prev, newBalanceItem].sort((a, b) => {
-        return a.classification.localeCompare(b.classification, undefined, { numeric: true });
-      });
+      const updatedList = [...prev, newBalanceItem].sort((a, b) =>
+        a.classification.localeCompare(b.classification, undefined, { numeric: true })
+      );
 
       return recalculateTree(updatedList);
     });
@@ -377,7 +451,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setBalances(blank);
     setHistory([]);
     setInitialSnapshot([]);
-    setPeriod({ ...initialPeriod, id: undefined });
+    setPeriod({ ...initialPeriod, id: undefined, status: 'OPEN' });
   };
 
   const balanceSheet = AccountingEngine.calculateBalanceSheet(balances);
@@ -410,13 +484,14 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         endDate: period.endDate,
         isBalanced: balanceSheet.isBalanced,
         sourceType: period.sourceType,
+        status: period.status === 'CLOSED' ? 'CLOSED' : 'IN_PROGRESS',
         balances,
       });
 
       setPeriod((prev) => ({
         ...prev,
         id: targetPeriodId,
-        status: balanceSheet.isBalanced ? 'BALANCED' : 'OPEN',
+        status: prev.status === 'CLOSED' ? 'CLOSED' : 'IN_PROGRESS',
       }));
 
       await refreshSavedPeriods();
@@ -439,7 +514,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           description: data.period.description,
           startDate: data.period.start_date,
           endDate: data.period.end_date,
-          status: data.period.status,
+          status: data.period.status || 'OPEN',
           sourceType: data.period.source_type,
         });
 
@@ -474,11 +549,15 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       }
 
-      if (data.balances && data.balances.length > 0) {
+      if (data.balances) {
         const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
-        const mappedBalances = allBase.map((acc) => {
-          const found = data.balances.find((b: any) => b.codeReduced === acc.codeReduced);
-          if (found) return found;
+        const loadedMap = new Map<number, AccountingBalance>();
+        data.balances.forEach((b: any) => loadedMap.set(b.codeReduced, b));
+
+        const mergedList = allBase.map((acc) => {
+          if (loadedMap.has(acc.codeReduced)) {
+            return loadedMap.get(acc.codeReduced)!;
+          }
           return {
             periodId: data.period.id,
             accountId: String(acc.codeReduced),
@@ -495,7 +574,12 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             finalNature: acc.nature,
           };
         });
-        const tree = recalculateTree(mappedBalances);
+
+        const sorted = mergedList.sort((a, b) =>
+          a.classification.localeCompare(b.classification, undefined, { numeric: true })
+        );
+
+        const tree = recalculateTree(sorted);
         setBalances(tree);
         setInitialSnapshot(tree.map((b) => ({ ...b })));
         setHistory([]);
@@ -565,6 +649,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         description: periodInfo.description,
         startDate: periodInfo.startDate,
         endDate: periodInfo.endDate,
+        status: 'OPEN',
         sourceType: 'IMPORTED',
       };
       setPeriod(newPeriodState);
@@ -583,13 +668,14 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         endDate: periodInfo.endDate,
         isBalanced: calculated.isBalanced,
         sourceType: 'IMPORTED',
+        status: 'OPEN',
         balances: updatedBalances,
       });
 
       setPeriod((prev) => ({
         ...prev,
         id: savedPeriodId,
-        status: calculated.isBalanced ? 'BALANCED' : 'OPEN',
+        status: 'OPEN',
       }));
 
       await refreshSavedPeriods();
@@ -617,6 +703,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateBalance,
         recordHistoryEntry,
         addNewAccount,
+        syncChartOfAccounts,
+        togglePeriodClose,
         applyAutoBalance,
         undoLastChange,
         undoAllChanges,

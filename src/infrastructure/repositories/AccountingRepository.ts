@@ -1,5 +1,7 @@
 import { createClient } from '@/infrastructure/supabase/client';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
+import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
+import { ChartAccount } from '@/domain/entities/ChartAccount';
 
 export interface SavedPeriodSummary {
   id: string;
@@ -8,9 +10,10 @@ export interface SavedPeriodSummary {
   description: string;
   start_date: string;
   end_date: string;
-  status: 'OPEN' | 'BALANCED' | 'CLOSED';
+  status: 'OPEN' | 'IN_PROGRESS' | 'BALANCED' | 'CLOSED';
   source_type: 'MANUAL' | 'IMPORTED';
   created_at: string;
+  updated_at?: string;
   company?: {
     corporate_name: string;
     cnpj: string;
@@ -105,6 +108,15 @@ export class AccountingRepository {
     return data;
   }
 
+  async updatePeriodStatus(periodId: string, status: 'OPEN' | 'IN_PROGRESS' | 'CLOSED'): Promise<void> {
+    const { error } = await this.supabase
+      .from('accounting_periods')
+      .update({ status, created_at: new Date().toISOString() })
+      .eq('id', periodId);
+
+    if (error) throw new Error(`Erro ao atualizar status do período: ${error.message}`);
+  }
+
   async savePeriodWithBalances(params: {
     periodId?: string;
     companyId?: string;
@@ -116,6 +128,7 @@ export class AccountingRepository {
     endDate: string;
     isBalanced: boolean;
     sourceType?: 'MANUAL' | 'IMPORTED';
+    status?: 'OPEN' | 'IN_PROGRESS' | 'CLOSED';
     balances: AccountingBalance[];
   }): Promise<string> {
     const {
@@ -127,8 +140,8 @@ export class AccountingRepository {
       description,
       startDate,
       endDate,
-      isBalanced,
       sourceType = 'MANUAL',
+      status,
       balances,
     } = params;
 
@@ -142,10 +155,13 @@ export class AccountingRepository {
         ? accountantId
         : await this.ensureAccountant(accountantData);
 
-    // 1. Cria ou atualiza o período contábil
     let targetPeriodId: string = periodId ?? '';
+    const nowIso = new Date().toISOString();
 
-    if (!targetPeriodId || targetPeriodId === 'current-period' || targetPeriodId === 'imported-temp') {
+    // Se é uma criação inicial importada, status padrão é OPEN. Se é edição manual, vira IN_PROGRESS
+    const initialStatus = status || (sourceType === 'IMPORTED' && (!periodId || periodId === 'imported-temp') ? 'OPEN' : 'IN_PROGRESS');
+
+    if (!targetPeriodId || targetPeriodId === 'current-period' || targetPeriodId === 'imported-temp' || targetPeriodId === 'initial' || targetPeriodId === 'new') {
       const { data: newPeriod, error: periodErr } = await this.supabase
         .from('accounting_periods')
         .insert({
@@ -154,8 +170,9 @@ export class AccountingRepository {
           description,
           start_date: startDate,
           end_date: endDate,
-          status: isBalanced ? 'BALANCED' : 'OPEN',
+          status: initialStatus,
           source_type: sourceType,
+          created_at: nowIso,
         })
         .select('id')
         .single();
@@ -171,15 +188,15 @@ export class AccountingRepository {
           description,
           start_date: startDate,
           end_date: endDate,
-          status: isBalanced ? 'BALANCED' : 'OPEN',
+          status: status || 'IN_PROGRESS',
           source_type: sourceType,
+          created_at: nowIso,
         })
         .eq('id', targetPeriodId);
 
       if (updateErr) throw new Error(`Erro ao atualizar período: ${updateErr.message}`);
     }
 
-    // 2. Busca contas existentes para esta empresa
     const { data: existingAccounts } = await this.supabase
       .from('chart_of_accounts')
       .select('id, code_reduced')
@@ -192,7 +209,6 @@ export class AccountingRepository {
       }
     });
 
-    // 3. Cadastra as contas que ainda não existem
     const missingAccounts = balances
       .filter((b) => !accountIdMap.has(b.codeReduced))
       .map((b) => ({
@@ -218,7 +234,6 @@ export class AccountingRepository {
       }
     }
 
-    // 4. Prepara o payload dos saldos garantindo UUIDs válidos
     const balancesPayload = balances
       .filter((b) => accountIdMap.has(b.codeReduced))
       .map((b) => ({
@@ -230,7 +245,7 @@ export class AccountingRepository {
         credit_amount: Number(b.creditAmount) || 0,
         final_balance: Number(b.finalBalance) || 0,
         final_balance_nature: b.finalNature,
-        updated_at: new Date().toISOString(),
+        updated_at: nowIso,
       }));
 
     await this.supabase.from('account_balances').delete().eq('period_id', targetPeriodId);
@@ -244,6 +259,78 @@ export class AccountingRepository {
     }
 
     return targetPeriodId;
+  }
+
+  async syncAllPeriodsWithChartOfAccounts(customAccounts: Omit<ChartAccount, 'id' | 'companyId'>[] = []): Promise<number> {
+    const allAccounts = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
+    const { data: periods, error: pErr } = await this.supabase
+      .from('accounting_periods')
+      .select('id, company_id');
+
+    if (pErr || !periods || periods.length === 0) return 0;
+
+    let totalAdded = 0;
+
+    for (const period of periods) {
+      const { data: existingBalances } = await this.supabase
+        .from('account_balances')
+        .select('account_id, chart_of_accounts ( code_reduced )')
+        .eq('period_id', period.id);
+
+      const presentCodes = new Set<number>();
+      (existingBalances || []).forEach((b: any) => {
+        if (b.chart_of_accounts?.code_reduced) {
+          presentCodes.add(Number(b.chart_of_accounts.code_reduced));
+        }
+      });
+
+      const missing = allAccounts.filter((a) => !presentCodes.has(a.codeReduced));
+      if (missing.length === 0) continue;
+
+      // Garante IDs na tabela chart_of_accounts
+      for (const m of missing) {
+        const { data: existAcc } = await this.supabase
+          .from('chart_of_accounts')
+          .select('id')
+          .eq('code_reduced', m.codeReduced)
+          .maybeSingle();
+
+        let accId = existAcc?.id;
+        if (!accId) {
+          const { data: createdAcc } = await this.supabase
+            .from('chart_of_accounts')
+            .insert({
+              company_id: period.company_id,
+              code_reduced: m.codeReduced,
+              classification: m.classification,
+              description: m.description,
+              account_type: m.accountType,
+              nature: m.nature,
+              statement_group: m.statementGroup,
+            })
+            .select('id')
+            .single();
+          accId = createdAcc?.id;
+        }
+
+        if (accId) {
+          await this.supabase.from('account_balances').insert({
+            period_id: period.id,
+            account_id: accId,
+            initial_balance: 0,
+            initial_balance_nature: m.nature,
+            debit_amount: 0,
+            credit_amount: 0,
+            final_balance: 0,
+            final_balance_nature: m.nature,
+            updated_at: new Date().toISOString(),
+          });
+          totalAdded++;
+        }
+      }
+    }
+
+    return totalAdded;
   }
 
   async getSavedPeriods(): Promise<SavedPeriodSummary[]> {
@@ -279,9 +366,10 @@ export class AccountingRepository {
         description: String(item.description || ''),
         start_date: String(item.start_date || ''),
         end_date: String(item.end_date || ''),
-        status: (item.status as 'OPEN' | 'BALANCED' | 'CLOSED') || 'OPEN',
-        source_type: (item.source_type as 'MANUAL' | 'IMPORTED') || 'MANUAL',
+        status: (item.status as any) || 'OPEN',
+        source_type: (item.source_type as any) || 'MANUAL',
         created_at: String(item.created_at || ''),
+        updated_at: String(item.created_at || ''),
       };
 
       if (comp) {
@@ -350,11 +438,18 @@ export class AccountingRepository {
   }
 
   async deletePeriod(periodId: string): Promise<void> {
-    const { error } = await this.supabase
+    const { error: bErr } = await this.supabase
+      .from('account_balances')
+      .delete()
+      .eq('period_id', periodId);
+
+    if (bErr) throw new Error(`Erro ao deletar saldos: ${bErr.message}`);
+
+    const { error: pErr } = await this.supabase
       .from('accounting_periods')
       .delete()
       .eq('id', periodId);
 
-    if (error) throw new Error(error.message);
+    if (pErr) throw new Error(`Erro ao deletar período: ${pErr.message}`);
   }
 }

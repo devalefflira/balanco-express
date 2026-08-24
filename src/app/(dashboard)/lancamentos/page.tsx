@@ -18,6 +18,7 @@ import {
   Building,
   TrendingUp,
   Layers,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function LancamentosPage() {
@@ -30,6 +31,7 @@ export default function LancamentosPage() {
     setPeriod,
     updateBalance,
     recordHistoryEntry,
+    syncChartOfAccounts,
     applyAutoBalance,
     undoLastChange,
     undoAllChanges,
@@ -38,9 +40,9 @@ export default function LancamentosPage() {
   } = useAccounting();
 
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'ATIVO' | 'PASSIVO' | 'RESULTADO' | 'ALL'>('ATIVO');
 
-  // Armazena o valor original e snapshot da tabela no momento do foco no input
   const focusStateRef = useRef<{
     codeReduced: number;
     field: string;
@@ -65,6 +67,20 @@ export default function LancamentosPage() {
       recordHistoryEntry(codeReduced, field, initialValue, finalValue, snapshot);
     }
     focusStateRef.current = null;
+  };
+
+  const handleManualSync = async () => {
+    try {
+      const added = await syncChartOfAccounts();
+      if (added > 0) {
+        setSyncNotice(`${added} nova(s) conta(s) sincronizada(s) com sucesso!`);
+      } else {
+        setSyncNotice('Todas as contas do Plano de Contas já estão sincronizadas.');
+      }
+      setTimeout(() => setSyncNotice(null), 3000);
+    } catch (e: any) {
+      alert(`Erro ao sincronizar: ${e.message}`);
+    }
   };
 
   const handleSave = async () => {
@@ -135,6 +151,16 @@ export default function LancamentosPage() {
           </div>
 
           <button
+            onClick={handleManualSync}
+            disabled={isLoading}
+            title="Sincroniza novas contas criadas no Plano de Contas sem alterar os valores existentes"
+            className="mt-4 px-3.5 py-2 border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            Sincronizar Plano
+          </button>
+
+          <button
             onClick={resetBalances}
             className="mt-4 px-3.5 py-2 border rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 flex items-center gap-1.5 transition"
           >
@@ -154,6 +180,13 @@ export default function LancamentosPage() {
           </button>
         </div>
       </div>
+
+      {syncNotice && (
+        <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+          <span>{syncNotice}</span>
+        </div>
+      )}
 
       {/* 2. Barra de Status de Balanceamento */}
       {balanceSheet.isBalanced ? (
@@ -194,7 +227,7 @@ export default function LancamentosPage() {
         </div>
       )}
 
-      {/* 3. Abas de Navegação das Contas (Ativo, Passivo, Resultado, Todas) */}
+      {/* 3. Abas de Navegação das Contas */}
       <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
         <button
           onClick={() => setActiveTab('ATIVO')}
@@ -364,7 +397,7 @@ export default function LancamentosPage() {
           </div>
         </div>
 
-        {/* Painel Lateral de Histórico e Contrapartidas (1/4) */}
+        {/* Painel Lateral de Histórico e Contrapartidas */}
         <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-4 flex flex-col h-[680px]">
           <div className="flex items-center justify-between border-b pb-3">
             <div className="flex items-center gap-2">
