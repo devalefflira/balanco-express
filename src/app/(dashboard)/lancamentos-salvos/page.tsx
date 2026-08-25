@@ -16,6 +16,7 @@ import {
   Lock,
   Unlock,
   CheckCircle,
+  ArrowRight,
 } from 'lucide-react';
 
 export default function LancamentosSalvosPage() {
@@ -32,6 +33,7 @@ export default function LancamentosSalvosPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [forwardNotice, setForwardNotice] = useState<string | null>(null);
 
   const handleEdit = async (periodId: string) => {
     try {
@@ -74,7 +76,13 @@ export default function LancamentosSalvosPage() {
   const handleToggleStatus = async (item: SavedPeriodSummary) => {
     setTogglingId(item.id);
     try {
-      await togglePeriodClose(item.id, item.status);
+      const result = await togglePeriodClose(item.id, item.status);
+      if (result?.nextPeriodUpdated && (result.accountsForwarded || 0) > 0) {
+        setForwardNotice(
+          `Fechamento concluído! ${result.accountsForwarded} saldos patrimoniais foram transportados automaticamente como saldo inicial para o período: "${result.nextPeriodUpdated}".`
+        );
+        setTimeout(() => setForwardNotice(null), 6000);
+      }
     } catch (e: any) {
       alert(`Erro ao alterar status: ${e.message}`);
     } finally {
@@ -111,7 +119,7 @@ export default function LancamentosSalvosPage() {
         </span>
       );
     }
-    if (status === 'IN_PROGRESS' || status === 'BALANCED') {
+    if (status === 'BALANCED') {
       return (
         <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800">
           <Edit className="w-3 h-3" />
@@ -129,7 +137,7 @@ export default function LancamentosSalvosPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Cabeçalho com o botão Sincronizar Plano de Contas */}
+      {/* Cabeçalho com botão de sincronização */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">
@@ -155,6 +163,13 @@ export default function LancamentosSalvosPage() {
         <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
           <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
           <span>{syncFeedback}</span>
+        </div>
+      )}
+
+      {forwardNotice && (
+        <div className="p-4 bg-sky-50 border border-sky-200 text-sky-900 rounded-xl text-xs flex items-center gap-2 shadow-sm animate-in fade-in">
+          <Sparkles className="w-5 h-5 text-sky-600 flex-shrink-0" />
+          <span className="font-medium">{forwardNotice}</span>
         </div>
       )}
 

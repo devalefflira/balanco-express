@@ -2,6 +2,7 @@ import { createClient } from '@/infrastructure/supabase/client';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
 import { ChartAccount } from '@/domain/entities/ChartAccount';
+import { AccountingEngine } from '@/domain/services/AccountingEngine';
 
 export interface SavedPeriodSummary {
   id: string;
@@ -117,6 +118,81 @@ export class AccountingRepository {
     if (error) throw new Error(`Erro ao atualizar status do período: ${error.message}`);
   }
 
+  /**
+   * Transporta os saldos finais patrimoniais do exercício encerrado para os saldos iniciais do exercício seguinte
+   */
+  async forwardBalancesToNextPeriod(closedPeriodId: string): Promise<{ success: boolean; nextPeriodDescription?: string; accountsForwarded: number }> {
+    const { data: closedPeriod, error: pErr } = await this.supabase
+      .from('accounting_periods')
+      .select('*')
+      .eq('id', closedPeriodId)
+      .single();
+
+    if (pErr || !closedPeriod) return { success: false, accountsForwarded: 0 };
+
+    // Busca o período imediatamente posterior da mesma empresa
+    const { data: nextPeriod } = await this.supabase
+      .from('accounting_periods')
+      .select('*')
+      .eq('company_id', closedPeriod.company_id)
+      .gt('start_date', closedPeriod.start_date)
+      .order('start_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (!nextPeriod) {
+      return { success: true, accountsForwarded: 0 }; // Não há exercício seguinte cadastrado ainda
+    }
+
+    // Busca os saldos do período fechado
+    const { balances: closedBalances } = await this.getPeriodDetails(closedPeriodId);
+    const { balances: nextBalances } = await this.getPeriodDetails(nextPeriod.id);
+
+    const closedMap = new Map<number, AccountingBalance>();
+    closedBalances.forEach((b: AccountingBalance) => closedMap.set(b.codeReduced, b));
+
+    let forwardedCount = 0;
+
+    for (const nb of nextBalances) {
+      const prevAcc = closedMap.get(nb.codeReduced);
+      if (!prevAcc) continue;
+
+      // Apenas contas Patrimoniais (Ativo e Passivo/PL) transportam saldo inicial
+      if (nb.statementGroup === 'ATIVO' || nb.statementGroup === 'PASSIVO' || nb.statementGroup === 'PL') {
+        const newInitial = prevAcc.finalBalance || 0;
+        const newInitialNat = prevAcc.finalNature || 'D';
+
+        const calc = AccountingEngine.calculateFinalBalance(
+          newInitial,
+          newInitialNat,
+          nb.debitAmount || 0,
+          nb.creditAmount || 0,
+          newInitialNat
+        );
+
+        await this.supabase
+          .from('account_balances')
+          .update({
+            initial_balance: newInitial,
+            initial_balance_nature: newInitialNat,
+            final_balance: calc.balance,
+            final_balance_nature: calc.nature,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('period_id', nextPeriod.id)
+          .eq('account_id', nb.accountId);
+
+        forwardedCount++;
+      }
+    }
+
+    return {
+      success: true,
+      nextPeriodDescription: nextPeriod.description,
+      accountsForwarded: forwardedCount,
+    };
+  }
+
   async savePeriodWithBalances(params: {
     periodId?: string;
     companyId?: string;
@@ -158,7 +234,6 @@ export class AccountingRepository {
     let targetPeriodId: string = periodId ?? '';
     const nowIso = new Date().toISOString();
 
-    // Garante que o status seja estritamente compatível com o CHECK constraint do banco
     const dbStatus: 'OPEN' | 'BALANCED' | 'CLOSED' = status
       ? status
       : sourceType === 'IMPORTED' && (!periodId || periodId === 'imported-temp')
@@ -352,7 +427,7 @@ export class AccountingRepository {
         companies ( corporate_name, cnpj, code ),
         accountants ( name, crc )
       `)
-      .order('created_at', { ascending: false });
+      .order('start_date', { ascending: false });
 
     if (error) throw new Error(error.message);
 

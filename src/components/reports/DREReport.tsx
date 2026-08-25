@@ -35,23 +35,32 @@ export const DREReport: React.FC<DREReportProps> = ({
     (b) => b.statementGroup === 'RECEITA' || b.statementGroup === 'CUSTO' || b.statementGroup === 'DESPESA'
   );
 
-  const revenda = balances.find((b) => b.codeReduced === 1211)?.finalBalance || 0;
-  const icms = balances.find((b) => b.codeReduced === 1260)?.finalBalance || 0;
-  const devolucoes = balances.find((b) => b.codeReduced === 1280)?.finalBalance || 0;
-  const cmv = balances.find((b) => b.codeReduced === 1974)?.finalBalance || 0;
-  const bonificacao = balances.find((b) => b.codeReduced === 1442)?.finalBalance || 0;
+  const getMov = (code: number) => {
+    const acc = balances.find((b) => b.codeReduced === code);
+    if (!acc) return 0;
+    if (acc.statementGroup === 'RECEITA') {
+      return acc.creditAmount || acc.finalBalance || 0;
+    }
+    return acc.debitAmount || acc.finalBalance || 0;
+  };
+
+  const revenda = getMov(1211);
+  const icms = getMov(1260);
+  const devolucoes = getMov(1280);
+  const cmv = getMov(1974);
+  const bonificacao = getMov(1442);
 
   const totalReceitas = revenda - icms - devolucoes - cmv + bonificacao;
 
   const totalDespesas = balances
     .filter((b) => b.statementGroup === 'DESPESA' && b.accountType === 'ANALITICA')
-    .reduce((acc, curr) => acc + (curr.finalBalance || 0), 0);
+    .reduce((acc, curr) => acc + (curr.debitAmount || curr.finalBalance || 0), 0);
 
   const lucroLiquido = totalReceitas - totalDespesas;
 
   return (
     <div className="max-w-4xl mx-auto bg-white p-8 font-sans text-xs text-gray-900 border shadow-sm print:border-none print:shadow-none print:p-0 print:max-w-full">
-      {/* Cabeçalho Oficial */}
+      {/* Cabeçalho */}
       <div className="border-b-2 border-black pb-3 mb-4">
         <div className="flex justify-between items-start">
           <div>
@@ -69,7 +78,7 @@ export const DREReport: React.FC<DREReportProps> = ({
         </div>
       </div>
 
-      {/* Tabela Idêntica ao Modelo da DRE */}
+      {/* Tabela DRE */}
       <table className="w-full border-collapse mb-6">
         <thead>
           <tr className="border-b border-black text-left font-bold">
@@ -82,6 +91,11 @@ export const DREReport: React.FC<DREReportProps> = ({
         <tbody>
           {dreAccounts.map((item, idx) => {
             const isSynthetic = item.accountType === 'SINTETICA';
+            const value =
+              item.statementGroup === 'RECEITA'
+                ? (item.creditAmount || item.finalBalance || 0)
+                : (item.debitAmount || item.finalBalance || 0);
+
             return (
               <tr
                 key={idx}
@@ -98,8 +112,8 @@ export const DREReport: React.FC<DREReportProps> = ({
                 <td className="py-1 text-center font-mono text-gray-600">{item.classification}</td>
                 <td className="py-1 text-center font-mono text-gray-500">{item.codeReduced}</td>
                 <td className="py-1 text-right font-mono">
-                  {formatCurrency(item.finalBalance)}
-                  {item.finalNature}
+                  {formatCurrency(value)}
+                  {item.statementGroup === 'RECEITA' ? 'C' : 'D'}
                 </td>
               </tr>
             );
@@ -107,7 +121,7 @@ export const DREReport: React.FC<DREReportProps> = ({
         </tbody>
       </table>
 
-      {/* Resumo do Resultado do Exercício */}
+      {/* Resumo do Resultado */}
       <div className="border-t-2 border-black pt-3 mb-6 print:break-inside-avoid space-y-1 font-mono text-xs">
         <div className="flex justify-between font-bold">
           <span>RECEITAS LÍQUIDAS:</span>

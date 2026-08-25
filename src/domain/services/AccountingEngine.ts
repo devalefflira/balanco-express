@@ -27,6 +27,12 @@ export interface BalanceSheetResult {
 }
 
 export class AccountingEngine {
+  /**
+   * Calcula o Saldo Atual matematicamente:
+   * Contas devedoras (D): Saldo = Saldo Anterior (D) + Débitos - Créditos
+   * Contas credoras (C):  Saldo = Saldo Anterior (C) + Créditos - Débitos
+   * Se Débito == Crédito e Saldo Anterior == 0, o Saldo Atual é OBRIGATORIAMENTE 0,00.
+   */
   public static calculateFinalBalance(
     initialBalance: number,
     initialNature: 'D' | 'C',
@@ -34,9 +40,9 @@ export class AccountingEngine {
     credit: number,
     accountNature: 'D' | 'C'
   ): { balance: number; nature: 'D' | 'C' } {
-    const initial = new Decimal(initialBalance);
-    const deb = new Decimal(debit);
-    const cred = new Decimal(credit);
+    const initial = new Decimal(initialBalance || 0);
+    const deb = new Decimal(debit || 0);
+    const cred = new Decimal(credit || 0);
 
     let netValue = new Decimal(0);
 
@@ -44,6 +50,11 @@ export class AccountingEngine {
       netValue = initial.plus(deb).minus(cred);
     } else {
       netValue = initial.plus(cred).minus(deb);
+    }
+
+    // Se o valor líquido for zero (débito == crédito com saldo inicial zerado)
+    if (netValue.abs().lessThan(0.0001)) {
+      return { balance: 0, nature: accountNature };
     }
 
     if (accountNature === 'D') {
@@ -59,6 +70,11 @@ export class AccountingEngine {
     }
   }
 
+  /**
+   * Apura a DRE com base na movimentação contábil real do exercício:
+   * Receitas: Créditos acumulados ou Saldo
+   * Despesas/Custos: Débitos acumulados ou Saldo
+   */
   public static calculateDRE(balances: AccountingBalance[]): DREResult {
     let grossRevenue = new Decimal(0);
     let deductions = new Decimal(0);
@@ -70,20 +86,25 @@ export class AccountingEngine {
     const analytical = balances.filter(b => b.accountType === 'ANALITICA');
 
     for (const item of analytical) {
-      const val = new Decimal(item.finalBalance || 0);
+      // Pega o movimento real: se for despesa pega o débito, se for receita pega o crédito
+      const movVal = new Decimal(
+        item.statementGroup === 'RECEITA'
+          ? (item.creditAmount || item.finalBalance || 0)
+          : (item.debitAmount || item.finalBalance || 0)
+      );
 
       if (item.classification.startsWith('3-1')) {
-        grossRevenue = grossRevenue.plus(val);
+        grossRevenue = grossRevenue.plus(movVal);
       } else if (item.classification.startsWith('3-2-01')) {
-        deductions = deductions.plus(val);
+        deductions = deductions.plus(movVal);
       } else if (item.classification.startsWith('3-2-03')) {
-        costOfGoodsSold = costOfGoodsSold.plus(val);
+        costOfGoodsSold = costOfGoodsSold.plus(movVal);
       } else if (item.classification.startsWith('3-5') || item.classification.startsWith('3-3')) {
-        nonOperatingRevenue = nonOperatingRevenue.plus(val);
+        nonOperatingRevenue = nonOperatingRevenue.plus(movVal);
       } else if (item.classification.startsWith('4-2')) {
-        financialExpenses = financialExpenses.plus(val);
+        financialExpenses = financialExpenses.plus(movVal);
       } else if (item.classification.startsWith('4-1')) {
-        operatingExpenses = operatingExpenses.plus(val);
+        operatingExpenses = operatingExpenses.plus(movVal);
       }
     }
 

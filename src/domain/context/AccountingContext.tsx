@@ -6,6 +6,7 @@ import { ChartAccount } from '@/domain/entities/ChartAccount';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { AccountingEngine, BalanceSheetResult } from '@/domain/services/AccountingEngine';
 import { AutoBalancer, BalancingAction } from '@/domain/services/AutoBalancer';
+import { ExpenseDistributor, ExpenseDistributionResult } from '@/domain/services/ExpenseDistributor';
 import { AccountingRepository, SavedPeriodSummary } from '@/infrastructure/repositories/AccountingRepository';
 
 export interface CompanyData {
@@ -55,6 +56,11 @@ export interface ModificationHistoryEntry {
   previousValue: number;
   newValue: number;
   counterpart?: BalancingAction;
+  distributionInfo?: {
+    sourceAccount: string;
+    totalDistributed: number;
+    targets: { name: string; amount: number }[];
+  };
   snapshot: AccountingBalance[];
 }
 
@@ -75,7 +81,8 @@ interface AccountingContextType {
   recordHistoryEntry: (codeReduced: number, field: string, prevVal: number, newVal: number, snapshot: AccountingBalance[]) => void;
   addNewAccount: (newAccount: Omit<ChartAccount, 'id' | 'companyId'>) => void;
   syncChartOfAccounts: () => Promise<number>;
-  togglePeriodClose: (periodId: string, currentStatus: string) => Promise<void>;
+  distributeExpenseAccount: (sourceCodeReduced: number, percentage: number) => ExpenseDistributionResult;
+  togglePeriodClose: (periodId: string, currentStatus: string) => Promise<{ nextPeriodUpdated?: string; accountsForwarded?: number }>;
   applyAutoBalance: () => void;
   undoLastChange: () => void;
   undoAllChanges: () => void;
@@ -259,6 +266,39 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
+  const distributeExpenseAccount = (sourceCodeReduced: number, percentage: number): ExpenseDistributionResult => {
+    const snapshot = balances.map((b) => ({ ...b }));
+    const result = ExpenseDistributor.distribute(balances, sourceCodeReduced, percentage);
+
+    const recalculated = recalculateTree(result.updatedBalances);
+    setBalances(recalculated);
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+    setHistory((h) => [
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: timeStr,
+        accountCode: result.sourceAccount.codeReduced,
+        accountName: result.sourceAccount.description,
+        classification: result.sourceAccount.classification,
+        field: 'Distribuição de Despesas',
+        previousValue: result.sourceAccount.originalAmount,
+        newValue: result.sourceAccount.retainedAmount,
+        distributionInfo: {
+          sourceAccount: result.sourceAccount.description,
+          totalDistributed: result.totalDistributed,
+          targets: result.targets.map((t) => ({ name: t.description, amount: t.allocatedAmount })),
+        },
+        snapshot,
+      },
+      ...h,
+    ]);
+
+    return result;
+  };
+
   const syncChartOfAccounts = async (): Promise<number> => {
     setIsLoading(true);
     try {
@@ -304,15 +344,31 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const togglePeriodClose = async (periodId: string, currentStatus: string) => {
+  const togglePeriodClose = async (periodId: string, currentStatus: string): Promise<{ nextPeriodUpdated?: string; accountsForwarded?: number }> => {
     setIsLoading(true);
     try {
       const newStatus: 'OPEN' | 'BALANCED' | 'CLOSED' = currentStatus === 'CLOSED' ? 'BALANCED' : 'CLOSED';
       await repository.updatePeriodStatus(periodId, newStatus);
+
+      let forwardResult: { nextPeriodUpdated?: string; accountsForwarded?: number } = {};
+
+      // Se o período está sendo FINALIZADO, executa o transporte de saldos para o ano seguinte
+      if (newStatus === 'CLOSED') {
+        const fwd = await repository.forwardBalancesToNextPeriod(periodId);
+        if (fwd.success && fwd.nextPeriodDescription) {
+          forwardResult = {
+            nextPeriodUpdated: fwd.nextPeriodDescription,
+            accountsForwarded: fwd.accountsForwarded,
+          };
+        }
+      }
+
       if (period.id === periodId) {
         setPeriod((prev) => ({ ...prev, status: newStatus }));
       }
+
       await refreshSavedPeriods();
+      return forwardResult;
     } finally {
       setIsLoading(false);
     }
@@ -703,6 +759,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         recordHistoryEntry,
         addNewAccount,
         syncChartOfAccounts,
+        distributeExpenseAccount,
         togglePeriodClose,
         applyAutoBalance,
         undoLastChange,

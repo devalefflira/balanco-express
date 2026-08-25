@@ -1,5 +1,6 @@
 import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
+import { AccountingEngine } from './AccountingEngine';
 import * as XLSX from 'xlsx';
 
 export interface ParsedAccountingData {
@@ -62,7 +63,6 @@ export class AccountingParser {
   private static extractDates(text: string, filenameHint: string = ''): { startDate: string; endDate: string; description: string } {
     const combined = `${filenameHint} ${text}`;
 
-    // 1. Padrão explícito: DD/MM/AAAA até DD/MM/AAAA
     const rangeMatch = combined.match(/(\d{2})[./\-](\d{2})[./\-](\d{4})\s*(?:a|até|ate|-)\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
     if (rangeMatch) {
       const [, d1, m1, y1, d2, m2, y2] = rangeMatch;
@@ -73,7 +73,6 @@ export class AccountingParser {
       };
     }
 
-    // 2. Padrão Trimestral (ex: 1T2026, 1T_2026, 1T-2026, 1_trimestre_2026)
     const trimMatch = combined.match(/([1-4])\s*(?:T|trimestre|º\s*trimestre|o\s*trimestre)[_\-\s]*(\d{4})/i);
     if (trimMatch) {
       const quarter = parseInt(trimMatch[1], 10);
@@ -92,7 +91,6 @@ export class AccountingParser {
       };
     }
 
-    // 3. Padrão: Encerrado em DD/MM/AAAA ou Posição em DD/MM/AAAA
     const singleMatch = combined.match(/(?:encerrado em|posi[cç][aã]o em|at[eé])\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
     if (singleMatch) {
       const [, d, m, y] = singleMatch;
@@ -104,7 +102,6 @@ export class AccountingParser {
       };
     }
 
-    // 4. Reconhecimento robusto do Ano (ex: balancete_2025.xls, 2024, 2025, 2026)
     const yearMatch = combined.match(/(?:^|[^\d])(20\d{2})(?:[^\d]|$)/);
     if (yearMatch) {
       const y = yearMatch[1];
@@ -191,16 +188,16 @@ export class AccountingParser {
         debitAmount = found.deb;
         creditAmount = found.cred;
 
-        if (acc.statementGroup === 'RECEITA') {
-          finalBalance = found.cred > 0 ? found.cred : found.deb;
-          finalNature = 'C';
-        } else if (acc.statementGroup === 'CUSTO' || acc.statementGroup === 'DESPESA') {
-          finalBalance = found.deb > 0 ? found.deb : found.cred;
-          finalNature = 'D';
-        } else {
-          finalBalance = found.final;
-          finalNature = found.finalNat;
-        }
+        // Calcula o saldo final matematicamente respeitando a regra de zeramento
+        const calc = AccountingEngine.calculateFinalBalance(
+          initialBalance,
+          initialNature,
+          debitAmount,
+          creditAmount,
+          acc.nature
+        );
+        finalBalance = calc.balance;
+        finalNature = calc.nature;
       }
 
       return {
@@ -293,16 +290,15 @@ export class AccountingParser {
         debitAmount = found.deb;
         creditAmount = found.cred;
 
-        if (acc.statementGroup === 'RECEITA') {
-          finalBalance = found.cred > 0 ? found.cred : found.deb;
-          finalNature = 'C';
-        } else if (acc.statementGroup === 'CUSTO' || acc.statementGroup === 'DESPESA') {
-          finalBalance = found.deb > 0 ? found.deb : found.cred;
-          finalNature = 'D';
-        } else {
-          finalBalance = found.final;
-          finalNature = found.finalNat;
-        }
+        const calc = AccountingEngine.calculateFinalBalance(
+          initialBalance,
+          initialNature,
+          debitAmount,
+          creditAmount,
+          acc.nature
+        );
+        finalBalance = calc.balance;
+        finalNature = calc.nature;
       }
 
       return {

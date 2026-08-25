@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
+import { ExpenseDistributor } from '@/domain/services/ExpenseDistributor';
 import { formatCurrency } from '@/lib/formatters';
 import {
   Save,
@@ -19,6 +20,9 @@ import {
   TrendingUp,
   Layers,
   RefreshCw,
+  PieChart,
+  X,
+  Share2,
 } from 'lucide-react';
 
 export default function LancamentosPage() {
@@ -32,6 +36,7 @@ export default function LancamentosPage() {
     updateBalance,
     recordHistoryEntry,
     syncChartOfAccounts,
+    distributeExpenseAccount,
     applyAutoBalance,
     undoLastChange,
     undoAllChanges,
@@ -42,6 +47,13 @@ export default function LancamentosPage() {
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'ATIVO' | 'PASSIVO' | 'RESULTADO' | 'ALL'>('ATIVO');
+
+  // Modal de Distribuição de Despesas
+  const [isDistributeModalOpen, setIsDistributeModalOpen] = useState(false);
+  const [selectedExpenseCode, setSelectedExpenseCode] = useState<number>(1624);
+  const [distributePercent, setDistributePercent] = useState<number>(85);
+
+  const outlierExpenses = ExpenseDistributor.detectOutlierExpenses(balances);
 
   const focusStateRef = useRef<{
     codeReduced: number;
@@ -80,6 +92,17 @@ export default function LancamentosPage() {
       setTimeout(() => setSyncNotice(null), 3000);
     } catch (e: any) {
       alert(`Erro ao sincronizar: ${e.message}`);
+    }
+  };
+
+  const handleConfirmDistribution = () => {
+    try {
+      distributeExpenseAccount(selectedExpenseCode, distributePercent);
+      setIsDistributeModalOpen(false);
+      setSyncNotice('Despesa distribuída com sucesso entre as contas operacionais!');
+      setTimeout(() => setSyncNotice(null), 4000);
+    } catch (e: any) {
+      alert(`Erro na distribuição: ${e.message}`);
     }
   };
 
@@ -181,6 +204,31 @@ export default function LancamentosPage() {
         </div>
       </div>
 
+      {/* Alerta de Despesa Concentrada com Ação Rápida */}
+      {outlierExpenses.length > 0 && (
+        <div className="p-4 bg-purple-50 border border-purple-200 text-purple-900 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-3">
+            <PieChart className="w-5 h-5 text-purple-600 flex-shrink-0" />
+            <div>
+              <p className="text-xs font-bold">Concentração de Despesa Detectada</p>
+              <p className="text-[11px] text-purple-800">
+                A conta <span className="font-bold">[{outlierExpenses[0].codeReduced}] {outlierExpenses[0].description}</span> possui um valor muito concentrado (R$ {formatCurrency(outlierExpenses[0].debitAmount || outlierExpenses[0].finalBalance)}).
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setSelectedExpenseCode(outlierExpenses[0].codeReduced);
+              setIsDistributeModalOpen(true);
+            }}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow transition flex-shrink-0"
+          >
+            <Share2 className="w-4 h-4" />
+            Distribuir Despesas
+          </button>
+        </div>
+      )}
+
       {syncNotice && (
         <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl text-xs flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
@@ -227,7 +275,7 @@ export default function LancamentosPage() {
         </div>
       )}
 
-      {/* 3. Abas de Navegação das Contas */}
+      {/* 3. Abas de Navegação */}
       <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
         <button
           onClick={() => setActiveTab('ATIVO')}
@@ -278,7 +326,7 @@ export default function LancamentosPage() {
         </button>
       </div>
 
-      {/* 4. Grid Principal: Tabela de Lançamentos + Painel Lateral de Histórico */}
+      {/* 4. Grid Principal: Tabela de Lançamentos + Painel Lateral */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
         {/* Tabela (3/4) */}
         <div className="xl:col-span-3 bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col">
@@ -434,7 +482,7 @@ export default function LancamentosPage() {
                 <History className="w-8 h-8 opacity-30 mb-2" />
                 <p className="font-semibold text-gray-500">Nenhuma alteração recente</p>
                 <p className="text-[10px] text-gray-400 mt-1">
-                  Altere um valor na tabela ou use o Balanceamento Automático para rastrear as contrapartidas.
+                  Altere um valor na tabela, distribua despesas ou use o Balanceamento Automático para rastrear as contrapartidas.
                 </p>
               </div>
             ) : (
@@ -448,7 +496,29 @@ export default function LancamentosPage() {
                     <span className="font-bold text-gray-600">Conta: {entry.classification}</span>
                   </div>
 
-                  {entry.counterpart ? (
+                  {entry.distributionInfo ? (
+                    /* Detalhe da Distribuição de Despesas no Histórico */
+                    <div className="space-y-1.5">
+                      <div className="p-2 bg-purple-50 border border-purple-200 rounded-lg text-purple-900 text-[11px] font-semibold">
+                        <p className="flex items-center gap-1 font-bold text-purple-950">
+                          <Share2 className="w-3 h-3 text-purple-600" />
+                          Rateio / Distribuição de Despesa
+                        </p>
+                        <p className="text-[10px] text-purple-800 mt-0.5">
+                          Origem: {entry.distributionInfo.sourceAccount} (Total Distribuído: R$ {formatCurrency(entry.distributionInfo.totalDistributed)})
+                        </p>
+                      </div>
+                      <div className="space-y-1 pt-1 max-h-32 overflow-y-auto text-[10px] font-mono divide-y divide-gray-100">
+                        {entry.distributionInfo.targets.map((t, idx) => (
+                          <div key={idx} className="flex justify-between py-0.5">
+                            <span className="text-gray-600 truncate max-w-[140px]">{t.name}</span>
+                            <span className="font-bold text-purple-700">+ R$ {formatCurrency(t.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : entry.counterpart ? (
+                    /* Detalhe do Balanceamento Automático */
                     <div className="space-y-1.5">
                       <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] font-semibold">
                         <p className="flex items-center gap-1 font-bold text-amber-950">
@@ -465,6 +535,7 @@ export default function LancamentosPage() {
                       </div>
                     </div>
                   ) : (
+                    /* Alteração Manual */
                     <div className="space-y-1">
                       <p className="font-bold text-gray-800 text-[11px] truncate">{entry.accountName}</p>
                       <div className="flex items-center justify-between font-mono text-[11px] text-gray-600 pt-1">
@@ -480,6 +551,95 @@ export default function LancamentosPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Distribuição de Despesas */}
+      {isDistributeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b bg-purple-50/60 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Share2 className="w-5 h-5 text-purple-600" />
+                <h3 className="text-sm font-bold text-gray-900">Distribuir Despesa Exorbitante</h3>
+              </div>
+              <button
+                onClick={() => setIsDistributeModalOpen(false)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Conta de Despesa de Origem</label>
+                <select
+                  value={selectedExpenseCode}
+                  onChange={(e) => setSelectedExpenseCode(parseInt(e.target.value, 10))}
+                  className="w-full p-2.5 border rounded-xl bg-white font-medium focus:ring-1 focus:ring-purple-500"
+                >
+                  {balances
+                    .filter((b) => b.statementGroup === 'DESPESA' && b.accountType === 'ANALITICA')
+                    .map((acc) => (
+                      <option key={acc.codeReduced} value={acc.codeReduced}>
+                        [{acc.codeReduced}] {acc.description} — R$ {formatCurrency(acc.debitAmount || acc.finalBalance)}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-bold text-gray-700">Percentual a ser Distribuído</label>
+                  <span className="font-mono font-bold text-purple-700 text-sm">{distributePercent}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="95"
+                  step="5"
+                  value={distributePercent}
+                  onChange={(e) => setDistributePercent(parseInt(e.target.value, 10))}
+                  className="w-full accent-purple-600 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+                  <span>Mínimo (10%)</span>
+                  <span>Reter {(100 - distributePercent)}% na conta original</span>
+                  <span>Máximo (95%)</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-xl space-y-1.5 text-[11px] text-purple-900">
+                <p className="font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-purple-600" />
+                  Garantia de Integridade Contábil
+                </p>
+                <p className="text-[10px] text-purple-800 leading-relaxed">
+                  O valor retirado será rateado proporcionalmente entre contas operacionais (Materiais de Consumo, Combustível, Energia, Depreciação, etc.). 
+                  O resultado do exercício (Lucro Líquido) permanecerá inalterado.
+                </p>
+              </div>
+
+              <div className="pt-4 border-t flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDistributeModalOpen(false)}
+                  className="px-4 py-2 border rounded-xl font-bold text-gray-600 hover:bg-gray-50 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDistribution}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-sm transition flex items-center gap-2"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Confirmar Rateio
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
