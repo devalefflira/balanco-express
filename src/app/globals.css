@@ -31,7 +31,7 @@ body {
 @media print {
   @page {
     size: A4 portrait;
-    margin: 10mm 10mm 10mm 10mm;
+    margin: 0mm;
   }
 
   html, 
