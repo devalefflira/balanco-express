@@ -144,15 +144,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [history, setHistory] = useState<ModificationHistoryEntry[]>([]);
   const [initialSnapshot, setInitialSnapshot] = useState<AccountingBalance[]>([]);
-  const [customAccounts, setCustomAccounts] = useState<Omit<ChartAccount, 'id' | 'companyId'>[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('CUSTOM_CHART_ACCOUNTS');
-      if (saved) {
-        try { return JSON.parse(saved); } catch (e) {}
-      }
-    }
-    return [];
-  });
+  const [customAccounts, setCustomAccounts] = useState<Omit<ChartAccount, 'id' | 'companyId'>[]>([]);
 
   const [balances, setBalances] = useState<AccountingBalance[]>(() => {
     return DEFAULT_CHART_OF_ACCOUNTS.map((acc) => ({
@@ -172,20 +164,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
   });
 
-  const refreshSavedPeriods = useCallback(async () => {
-    try {
-      const list = await repository.getSavedPeriods();
-      setSavedPeriods(list);
-    } catch (e) {
-      console.error('Erro ao carregar períodos salvos:', e);
-    }
-  }, []);
-
-  useEffect(() => {
-    refreshSavedPeriods();
-  }, [refreshSavedPeriods]);
-
-  const recalculateTree = (items: AccountingBalance[]): AccountingBalance[] => {
+  const recalculateTree = useCallback((items: AccountingBalance[]): AccountingBalance[] => {
     const list = items.map((b) => ({ ...b }));
 
     const synthetics = list
@@ -203,20 +182,24 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       let totalFinal = 0;
       let totalDebit = 0;
       let totalCredit = 0;
-      let totalInitial = 0;
+      let totalInitialNet = 0;
 
       for (const child of children) {
         totalDebit += child.debitAmount || 0;
         totalCredit += child.creditAmount || 0;
-        totalInitial += child.initialBalance || 0;
 
+        // Cálculo com respeito à natureza contábil no Saldo Anterior
         if (syn.statementGroup === 'ATIVO') {
+          totalInitialNet += child.initialNature === 'D' ? (child.initialBalance || 0) : -(child.initialBalance || 0);
           totalFinal += child.finalNature === 'D' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         } else if (syn.statementGroup === 'PASSIVO' || syn.statementGroup === 'PL') {
+          totalInitialNet += child.initialNature === 'C' ? (child.initialBalance || 0) : -(child.initialBalance || 0);
           totalFinal += child.finalNature === 'C' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         } else if (syn.statementGroup === 'RECEITA') {
+          totalInitialNet += child.initialNature === 'C' ? (child.initialBalance || 0) : -(child.initialBalance || 0);
           totalFinal += child.finalNature === 'C' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         } else {
+          totalInitialNet += child.initialNature === 'D' ? (child.initialBalance || 0) : -(child.initialBalance || 0);
           totalFinal += child.finalNature === 'D' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
         }
       }
@@ -225,21 +208,123 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (target) {
         target.debitAmount = totalDebit;
         target.creditAmount = totalCredit;
-        target.initialBalance = totalInitial;
+        target.initialBalance = Math.abs(totalInitialNet);
         target.finalBalance = Math.abs(totalFinal);
 
         if (syn.statementGroup === 'ATIVO') {
+          target.initialNature = totalInitialNet < 0 ? 'C' : 'D';
           target.finalNature = totalFinal < 0 ? 'C' : 'D';
         } else if (syn.statementGroup === 'PASSIVO' || syn.statementGroup === 'PL' || syn.statementGroup === 'RECEITA') {
+          target.initialNature = totalInitialNet < 0 ? 'D' : 'C';
           target.finalNature = totalFinal < 0 ? 'D' : 'C';
         } else {
+          target.initialNature = totalInitialNet < 0 ? 'C' : 'D';
           target.finalNature = totalFinal < 0 ? 'C' : 'D';
         }
       }
     }
 
     return list;
-  };
+  }, []);
+
+  const loadSavedPeriod = useCallback(async (periodId: string) => {
+    setIsLoading(true);
+    try {
+      const data = await repository.getPeriodDetails(periodId);
+
+      if (data.period) {
+        setPeriod({
+          id: data.period.id,
+          companyId: data.period.company_id,
+          accountantId: data.period.accountant_id,
+          description: data.period.description,
+          startDate: data.period.start_date,
+          endDate: data.period.end_date,
+          status: data.period.status || 'OPEN',
+          sourceType: data.period.source_type,
+        });
+
+        if (data.period.companies) {
+          setCompany({
+            id: data.period.companies.id,
+            code: data.period.companies.code,
+            corporateName: data.period.companies.corporate_name,
+            tradeName: data.period.companies.trade_name,
+            cnpj: data.period.companies.cnpj,
+            nire: data.period.companies.nire,
+            nireDate: data.period.companies.nire_date,
+            address: data.period.companies.address,
+            neighborhood: data.period.companies.neighborhood,
+            city: data.period.companies.city,
+            state: data.period.companies.state,
+            zipCode: data.period.companies.zip_code,
+            representativeName: data.period.companies.representative_name,
+            representativeCpf: data.period.companies.representative_cpf,
+            representativeRole: data.period.companies.representative_role,
+          });
+        }
+
+        if (data.period.accountants) {
+          setAccountant({
+            id: data.period.accountants.id,
+            name: data.period.accountants.name,
+            crc: data.period.accountants.crc,
+            cpf: data.period.accountants.cpf,
+            role: data.period.accountants.role,
+          });
+        }
+      }
+
+      if (data.balances && data.balances.length > 0) {
+        const loadedBalances: AccountingBalance[] = data.balances;
+        const loadedCodes = new Set<number>(loadedBalances.map((b) => b.codeReduced));
+
+        const missingDefault = DEFAULT_CHART_OF_ACCOUNTS.filter((d) => !loadedCodes.has(d.codeReduced)).map((acc) => ({
+          periodId: data.period.id,
+          accountId: String(acc.codeReduced),
+          classification: acc.classification,
+          description: acc.description,
+          codeReduced: acc.codeReduced,
+          statementGroup: acc.statementGroup,
+          accountType: acc.accountType,
+          initialBalance: 0,
+          initialNature: acc.nature,
+          debitAmount: 0,
+          creditAmount: 0,
+          finalBalance: 0,
+          finalNature: acc.nature,
+        }));
+
+        const unifiedList = [...loadedBalances, ...missingDefault].sort((a, b) =>
+          a.classification.localeCompare(b.classification, undefined, { numeric: true })
+        );
+
+        const tree = recalculateTree(unifiedList);
+        setBalances(tree);
+        setInitialSnapshot(tree.map((b) => ({ ...b })));
+        setHistory([]);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [recalculateTree]);
+
+  const refreshSavedPeriods = useCallback(async () => {
+    try {
+      const list = await repository.getSavedPeriods();
+      setSavedPeriods(list);
+
+      if (list.length > 0 && (!period.id || period.id === 'initial')) {
+        await loadSavedPeriod(list[0].id);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar períodos salvos:', e);
+    }
+  }, [loadSavedPeriod, period.id]);
+
+  useEffect(() => {
+    refreshSavedPeriods();
+  }, [refreshSavedPeriods]);
 
   const updateBalance = (codeReduced: number, field: keyof AccountingBalance, value: any) => {
     setBalances((prev) => {
@@ -303,40 +388,6 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setIsLoading(true);
     try {
       const added = await repository.syncAllPeriodsWithChartOfAccounts(customAccounts);
-
-      const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
-      setBalances((prev) => {
-        const currentMap = new Map<number, AccountingBalance>();
-        prev.forEach((b) => currentMap.set(b.codeReduced, b));
-
-        const mergedList: AccountingBalance[] = allBase.map((acc) => {
-          if (currentMap.has(acc.codeReduced)) {
-            return currentMap.get(acc.codeReduced)!;
-          }
-          return {
-            periodId: period.id || 'current',
-            accountId: String(acc.codeReduced),
-            classification: acc.classification,
-            description: acc.description,
-            codeReduced: acc.codeReduced,
-            statementGroup: acc.statementGroup,
-            accountType: acc.accountType,
-            initialBalance: 0,
-            initialNature: acc.nature,
-            debitAmount: 0,
-            creditAmount: 0,
-            finalBalance: 0,
-            finalNature: acc.nature,
-          };
-        });
-
-        const sorted = mergedList.sort((a, b) =>
-          a.classification.localeCompare(b.classification, undefined, { numeric: true })
-        );
-
-        return recalculateTree(sorted);
-      });
-
       await refreshSavedPeriods();
       return added;
     } finally {
@@ -352,7 +403,6 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       let forwardResult: { nextPeriodUpdated?: string; accountsForwarded?: number } = {};
 
-      // Se o período está sendo FINALIZADO, executa o transporte de saldos para o ano seguinte
       if (newStatus === 'CLOSED') {
         const fwd = await repository.forwardBalancesToNextPeriod(periodId);
         if (fwd.success && fwd.nextPeriodDescription) {
@@ -375,11 +425,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const addNewAccount = (newAccount: Omit<ChartAccount, 'id' | 'companyId'>) => {
-    const updatedCustom = [...customAccounts, newAccount];
-    setCustomAccounts(updatedCustom);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('CUSTOM_CHART_ACCOUNTS', JSON.stringify(updatedCustom));
-    }
+    setCustomAccounts((prev) => [...prev, newAccount]);
 
     setBalances((prev) => {
       const exists = prev.some((b) => b.codeReduced === newAccount.codeReduced);
@@ -551,94 +597,6 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       await refreshSavedPeriods();
       return targetPeriodId;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const loadSavedPeriod = async (periodId: string) => {
-    setIsLoading(true);
-    try {
-      const data = await repository.getPeriodDetails(periodId);
-
-      if (data.period) {
-        setPeriod({
-          id: data.period.id,
-          companyId: data.period.company_id,
-          accountantId: data.period.accountant_id,
-          description: data.period.description,
-          startDate: data.period.start_date,
-          endDate: data.period.end_date,
-          status: data.period.status || 'OPEN',
-          sourceType: data.period.source_type,
-        });
-
-        if (data.period.companies) {
-          setCompany({
-            id: data.period.companies.id,
-            code: data.period.companies.code,
-            corporateName: data.period.companies.corporate_name,
-            tradeName: data.period.companies.trade_name,
-            cnpj: data.period.companies.cnpj,
-            nire: data.period.companies.nire,
-            nireDate: data.period.companies.nire_date,
-            address: data.period.companies.address,
-            neighborhood: data.period.companies.neighborhood,
-            city: data.period.companies.city,
-            state: data.period.companies.state,
-            zipCode: data.period.companies.zip_code,
-            representativeName: data.period.companies.representative_name,
-            representativeCpf: data.period.companies.representative_cpf,
-            representativeRole: data.period.companies.representative_role,
-          });
-        }
-
-        if (data.period.accountants) {
-          setAccountant({
-            id: data.period.accountants.id,
-            name: data.period.accountants.name,
-            crc: data.period.accountants.crc,
-            cpf: data.period.accountants.cpf,
-            role: data.period.accountants.role,
-          });
-        }
-      }
-
-      if (data.balances) {
-        const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
-        const loadedMap = new Map<number, AccountingBalance>();
-        data.balances.forEach((b: any) => loadedMap.set(b.codeReduced, b));
-
-        const mergedList = allBase.map((acc) => {
-          if (loadedMap.has(acc.codeReduced)) {
-            return loadedMap.get(acc.codeReduced)!;
-          }
-          return {
-            periodId: data.period.id,
-            accountId: String(acc.codeReduced),
-            classification: acc.classification,
-            description: acc.description,
-            codeReduced: acc.codeReduced,
-            statementGroup: acc.statementGroup,
-            accountType: acc.accountType,
-            initialBalance: 0,
-            initialNature: acc.nature,
-            debitAmount: 0,
-            creditAmount: 0,
-            finalBalance: 0,
-            finalNature: acc.nature,
-          };
-        });
-
-        const sorted = mergedList.sort((a, b) =>
-          a.classification.localeCompare(b.classification, undefined, { numeric: true })
-        );
-
-        const tree = recalculateTree(sorted);
-        setBalances(tree);
-        setInitialSnapshot(tree.map((b) => ({ ...b })));
-        setHistory([]);
-      }
     } finally {
       setIsLoading(false);
     }

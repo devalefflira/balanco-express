@@ -118,9 +118,6 @@ export class AccountingRepository {
     if (error) throw new Error(`Erro ao atualizar status do período: ${error.message}`);
   }
 
-  /**
-   * Transporta os saldos finais patrimoniais do exercício encerrado para os saldos iniciais do exercício seguinte
-   */
   async forwardBalancesToNextPeriod(closedPeriodId: string): Promise<{ success: boolean; nextPeriodDescription?: string; accountsForwarded: number }> {
     const { data: closedPeriod, error: pErr } = await this.supabase
       .from('accounting_periods')
@@ -130,7 +127,6 @@ export class AccountingRepository {
 
     if (pErr || !closedPeriod) return { success: false, accountsForwarded: 0 };
 
-    // Busca o período imediatamente posterior da mesma empresa
     const { data: nextPeriod } = await this.supabase
       .from('accounting_periods')
       .select('*')
@@ -141,10 +137,9 @@ export class AccountingRepository {
       .maybeSingle();
 
     if (!nextPeriod) {
-      return { success: true, accountsForwarded: 0 }; // Não há exercício seguinte cadastrado ainda
+      return { success: true, accountsForwarded: 0 };
     }
 
-    // Busca os saldos do período fechado
     const { balances: closedBalances } = await this.getPeriodDetails(closedPeriodId);
     const { balances: nextBalances } = await this.getPeriodDetails(nextPeriod.id);
 
@@ -157,7 +152,6 @@ export class AccountingRepository {
       const prevAcc = closedMap.get(nb.codeReduced);
       if (!prevAcc) continue;
 
-      // Apenas contas Patrimoniais (Ativo e Passivo/PL) transportam saldo inicial
       if (nb.statementGroup === 'ATIVO' || nb.statementGroup === 'PASSIVO' || nb.statementGroup === 'PL') {
         const newInitial = prevAcc.finalBalance || 0;
         const newInitialNat = prevAcc.finalNature || 'D';
