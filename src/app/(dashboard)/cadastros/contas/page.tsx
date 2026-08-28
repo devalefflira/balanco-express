@@ -3,10 +3,10 @@
 import React, { useState } from 'react';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { ChartAccount } from '@/domain/entities/ChartAccount';
-import { ListTree, Plus, Search, X, CheckCircle2, AlertCircle, Edit, Trash2 } from 'lucide-react';
+import { ListTree, Plus, Search, X, CheckCircle2, AlertCircle, Edit, Trash2, Printer } from 'lucide-react';
 
 export default function PlanoContasPage() {
-  const { balances, addNewAccount, editAccount, deleteAccount } = useAccounting();
+  const { balances, company, addNewAccount, editAccount, deleteAccount } = useAccounting();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCode, setEditingCode] = useState<number | null>(null);
@@ -30,6 +30,10 @@ export default function PlanoContasPage() {
     statementGroup: 'DESPESA',
     level: 4,
   });
+
+  const handlePrint = () => {
+    window.print();
+  };
 
   const filteredAccounts = balances.filter(
     (acc) =>
@@ -116,8 +120,24 @@ export default function PlanoContasPage() {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="p-6 space-y-6 max-w-7xl mx-auto print:p-0 print:max-w-full">
+      {/* Cabeçalho de Impressão Exclusivo */}
+      <div className="hidden print:block border-b-2 border-black pb-3 mb-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-sm font-bold uppercase">PRIME CONTABILIDADE</h1>
+            <h2 className="text-base font-extrabold">{company.corporateName}</h2>
+            <p className="text-xs">CNPJ: {company.cnpj} {company.nire ? `| NIRE: ${company.nire}` : ''}</p>
+          </div>
+          <div className="text-right">
+            <h3 className="text-sm font-bold">Plano de Contas Referencial</h3>
+            <p className="text-xs text-gray-600">Total de Contas: {filteredAccounts.length}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Cabeçalho da Tela */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
         <div>
           <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">
             <ListTree className="w-6 h-6 text-blue-600" />
@@ -128,24 +148,35 @@ export default function PlanoContasPage() {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreate}
-          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-sm transition"
-        >
-          <Plus className="w-4 h-4" />
-          Nova Conta
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handlePrint}
+            className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition"
+          >
+            <Printer className="w-4 h-4" />
+            Imprimir Plano de Contas
+          </button>
+
+          <button
+            onClick={handleOpenCreate}
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition"
+          >
+            <Plus className="w-4 h-4" />
+            Nova Conta
+          </button>
+        </div>
       </div>
 
       {successMessage && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2 print:hidden">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
           <span>{successMessage}</span>
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden space-y-4 p-5">
-        <div className="relative">
+      {/* Caixa de Pesquisa e Tabela */}
+      <div className="bg-white rounded-2xl border shadow-xs overflow-hidden space-y-4 p-5 print:border-none print:shadow-none print:p-0">
+        <div className="relative print:hidden">
           <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" />
           <input
             type="text"
@@ -156,9 +187,9 @@ export default function PlanoContasPage() {
           />
         </div>
 
-        <div className="max-h-[600px] overflow-y-auto">
+        <div className="max-h-[600px] overflow-y-auto print:max-h-none print:overflow-visible">
           <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-gray-50/80 text-gray-700 font-bold sticky top-0 border-b z-10 text-[11px]">
+            <thead className="bg-gray-50/80 text-gray-700 font-bold sticky top-0 border-b z-10 text-[11px] print:bg-gray-100 print:text-black">
               <tr>
                 <th className="py-2.5 px-3 w-16">Cód.</th>
                 <th className="py-2.5 px-3 w-32">Classificação</th>
@@ -166,7 +197,7 @@ export default function PlanoContasPage() {
                 <th className="py-2.5 px-3 text-center w-28">Tipo</th>
                 <th className="py-2.5 px-3 text-center w-20">Natureza</th>
                 <th className="py-2.5 px-3 text-center w-28">Grupo</th>
-                <th className="py-2.5 px-3 text-right w-24">Ações</th>
+                <th className="py-2.5 px-3 text-right w-24 print:hidden">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-mono">
@@ -177,31 +208,33 @@ export default function PlanoContasPage() {
                 return (
                   <tr
                     key={item.codeReduced}
-                    className={isSynthetic ? 'bg-gray-50/70 font-bold text-gray-900' : 'hover:bg-blue-50/20 text-gray-700'}
+                    className={`print:break-inside-avoid ${
+                      isSynthetic ? 'bg-gray-50/70 font-bold text-gray-900 print:bg-gray-100' : 'hover:bg-blue-50/20 text-gray-700'
+                    }`}
                   >
-                    <td className="py-2 px-3 text-gray-500">{item.codeReduced}</td>
-                    <td className="py-2 px-3 text-gray-600">{item.classification}</td>
+                    <td className="py-2 px-3 text-gray-500 print:text-black">{item.codeReduced}</td>
+                    <td className="py-2 px-3 text-gray-600 print:text-black">{item.classification}</td>
                     <td className="py-2 px-3 font-sans font-medium" style={{ paddingLeft: `${levelIndent + 12}px` }}>
                       {item.description}
                     </td>
                     <td className="py-2 px-3 text-center font-sans">
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          isSynthetic ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full print:border print:border-black ${
+                          isSynthetic ? 'bg-purple-100 text-purple-700 print:bg-transparent print:text-black' : 'bg-emerald-100 text-emerald-700 print:bg-transparent print:text-black'
                         }`}
                       >
                         {item.accountType}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-center font-bold">
-                      <span className={item.finalNature === 'D' ? 'text-blue-600' : 'text-emerald-600'}>
+                      <span className={item.finalNature === 'D' ? 'text-blue-600 print:text-black' : 'text-emerald-600 print:text-black'}>
                         {item.finalNature}
                       </span>
                     </td>
-                    <td className="py-2 px-3 text-center font-sans text-[11px] text-gray-600 font-semibold">
+                    <td className="py-2 px-3 text-center font-sans text-[11px] text-gray-600 font-semibold print:text-black">
                       {item.statementGroup}
                     </td>
-                    <td className="py-2 px-3 text-right space-x-1 font-sans">
+                    <td className="py-2 px-3 text-right space-x-1 font-sans print:hidden">
                       <button
                         onClick={() => handleOpenEdit(item)}
                         className="p-1 hover:bg-blue-50 rounded text-blue-600 transition"
@@ -225,8 +258,9 @@ export default function PlanoContasPage() {
         </div>
       </div>
 
+      {/* Modal de Criação / Edição de Conta */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 print:hidden">
           <div className="bg-white rounded-2xl border shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-5 border-b bg-gray-50/60 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -353,7 +387,7 @@ export default function PlanoContasPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm transition"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition"
                 >
                   {editingCode ? 'Salvar Alterações' : 'Criar Conta'}
                 </button>
