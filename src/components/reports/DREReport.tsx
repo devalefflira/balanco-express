@@ -2,118 +2,111 @@
 
 import React from 'react';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
+import { AccountingEngine } from '@/domain/services/AccountingEngine';
 import { formatCurrency } from '@/lib/formatters';
 import { ReportSignatures } from './ReportSignatures';
+import { CompanyData, AccountantData } from '@/domain/context/AccountingContext';
 
-interface DREReportProps {
-  company: {
-    corporateName: string;
-    cnpj: string;
-    nire?: string;
-    nireDate?: string;
-    address?: string;
-    representativeName: string;
-    representativeCpf: string;
-  };
-  accountant: {
-    name: string;
-    crc: string;
-  };
-  firmName?: string;
-  periodText: string;
+export interface DREReportProps {
   balances: AccountingBalance[];
+  company?: CompanyData;
+  accountant?: AccountantData;
+  periodText?: string;
+  companyName?: string;
+  cnpj?: string;
+  periodDescription?: string;
+  startDate?: string;
+  endDate?: string;
+  representativeName?: string;
+  representativeCpf?: string;
+  accountantName?: string;
+  accountantCrc?: string;
 }
 
 export const DREReport: React.FC<DREReportProps> = ({
+  balances,
   company,
   accountant,
-  firmName = 'PRIME CONTABILIDADE',
   periodText,
-  balances,
+  companyName,
+  cnpj,
+  periodDescription,
+  startDate,
+  endDate,
+  representativeName,
+  representativeCpf,
+  accountantName,
+  accountantCrc,
 }) => {
-  const dreAccounts = balances.filter(
-    (b) => b.statementGroup === 'RECEITA' || b.statementGroup === 'CUSTO' || b.statementGroup === 'DESPESA'
-  );
+  const compName = company?.corporateName || companyName || 'JC MACHADO DIAS';
+  const compCnpj = company?.cnpj || cnpj || '24.905.673/0001-59';
+  const periodDesc = periodText || periodDescription || `De ${startDate || '01/01/2024'} a ${endDate || '31/12/2024'}`;
 
-  const getMov = (code: number) => {
-    const acc = balances.find((b) => b.codeReduced === code);
-    if (!acc) return 0;
-    if (acc.statementGroup === 'RECEITA') {
-      return acc.creditAmount || acc.finalBalance || 0;
-    }
-    return acc.debitAmount || acc.finalBalance || 0;
-  };
+  const repName = company?.representativeName || representativeName || 'JOSE CARLOS MACHADO DIAS';
+  const repCpf = company?.representativeCpf || representativeCpf || '196.018.244-72';
+  const repRole = company?.representativeRole || 'Administrador';
+  const accName = accountant?.name || accountantName || 'JAMAILA FONSECA LOPES COSTA';
+  const accCrc = accountant?.crc || accountantCrc || '0124650';
 
-  const revenda = getMov(1211);
-  const icms = getMov(1260);
-  const devolucoes = getMov(1280);
-  const cmv = getMov(1974);
-  const bonificacao = getMov(1442);
+  const dreResult = AccountingEngine.calculateDRE(balances);
 
-  const totalReceitas = revenda - icms - devolucoes - cmv + bonificacao;
-
-  const totalDespesas = balances
-    .filter((b) => b.statementGroup === 'DESPESA' && b.accountType === 'ANALITICA')
-    .reduce((acc, curr) => acc + (curr.debitAmount || curr.finalBalance || 0), 0);
-
-  const lucroLiquido = totalReceitas - totalDespesas;
+  const dreAccounts = balances
+    .filter(
+      (b) =>
+        b.statementGroup === 'RECEITA' ||
+        b.statementGroup === 'CUSTO' ||
+        b.statementGroup === 'DESPESA' ||
+        b.classification.startsWith('3') ||
+        b.classification.startsWith('4')
+    )
+    .sort((a, b) => a.classification.localeCompare(b.classification, undefined, { numeric: true }));
 
   return (
-    <div className="max-w-4xl mx-auto bg-white p-8 font-sans text-xs text-gray-900 border shadow-sm print:border-none print:shadow-none print:p-0 print:max-w-full">
-      {/* Cabeçalho */}
-      <div className="border-b-2 border-black pb-3 mb-4">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-sm font-bold uppercase">{firmName}</h1>
-            <h2 className="text-base font-extrabold">{company.corporateName}</h2>
-            <p>{company.address}</p>
-            <p>
-              CNPJ: {company.cnpj} {company.nire && `| NIRE: ${company.nire} Data: ${company.nireDate || ''}`}
-            </p>
-          </div>
-          <div className="text-right font-semibold">
-            <p className="text-sm font-bold">Demonstração do Resultado do Exercício</p>
-            <p>{periodText}</p>
-          </div>
-        </div>
+    <div className="bg-white p-8 max-w-4xl mx-auto shadow-sm border rounded-xl text-xs font-sans text-gray-900 print:shadow-none print:border-none print:p-0">
+      <div className="border-b pb-4 mb-4 text-center">
+        <h1 className="text-base font-bold uppercase tracking-wider">{compName}</h1>
+        <p className="text-[11px] text-gray-600">CNPJ: {compCnpj}</p>
+        <h2 className="text-sm font-semibold uppercase mt-2">Demonstração do Resultado do Exercício</h2>
+        <p className="text-xs text-gray-500">{periodDesc}</p>
       </div>
 
-      {/* Tabela DRE */}
-      <table className="w-full border-collapse mb-6">
+      <table className="w-full text-left border-collapse mb-6">
         <thead>
-          <tr className="border-b border-black text-left font-bold">
-            <th className="py-1">Descrição</th>
-            <th className="py-1 text-center w-28">Classificação</th>
-            <th className="py-1 text-center w-20">Conta</th>
-            <th className="py-1 text-right w-36">Exercício Atual</th>
+          <tr className="border-b border-gray-300 text-gray-600 uppercase text-[10px]">
+            <th className="py-2 px-2">Descrição</th>
+            <th className="py-2 px-2 w-28">Classificação</th>
+            <th className="py-2 px-2 w-16 text-center">Conta</th>
+            <th className="py-2 px-2 w-36 text-right">Exercício Atual</th>
           </tr>
         </thead>
-        <tbody>
-          {dreAccounts.map((item, idx) => {
+        <tbody className="divide-y divide-gray-100 font-mono text-[11px]">
+          {dreAccounts.map((item) => {
             const isSynthetic = item.accountType === 'SINTETICA';
-            const value =
-              item.statementGroup === 'RECEITA'
-                ? (item.creditAmount || item.finalBalance || 0)
-                : (item.debitAmount || item.finalBalance || 0);
+            const levelIndent = (item.classification.split('-').length - 1) * 12;
+
+            let displayValue = item.finalBalance || 0;
+            if (isSynthetic) {
+              const children = balances.filter(
+                (b) =>
+                  b.accountType === 'ANALITICA' &&
+                  b.classification.startsWith(item.classification) &&
+                  b.codeReduced !== item.codeReduced
+              );
+              displayValue = children.reduce(
+                (sum, c) => sum + (c.statementGroup === 'RECEITA' ? (c.creditAmount || c.finalBalance || 0) : (c.debitAmount || c.finalBalance || 0)),
+                0
+              );
+            }
 
             return (
-              <tr
-                key={idx}
-                className={`border-b border-gray-100 print:break-inside-avoid ${
-                  isSynthetic ? 'font-bold bg-gray-50/70' : ''
-                }`}
-              >
-                <td
-                  className="py-1 pl-1"
-                  style={{ paddingLeft: `${(item.classification.split('-').length - 1) * 12}px` }}
-                >
+              <tr key={item.codeReduced} className={isSynthetic ? 'font-bold bg-gray-50/50 text-gray-900' : 'text-gray-700'}>
+                <td className="py-1 px-2 font-sans" style={{ paddingLeft: `${levelIndent + 8}px` }}>
                   {item.description}
                 </td>
-                <td className="py-1 text-center font-mono text-gray-600">{item.classification}</td>
-                <td className="py-1 text-center font-mono text-gray-500">{item.codeReduced}</td>
-                <td className="py-1 text-right font-mono">
-                  {formatCurrency(value)}
-                  {item.statementGroup === 'RECEITA' ? 'C' : 'D'}
+                <td className="py-1 px-2 text-gray-500">{item.classification}</td>
+                <td className="py-1 px-2 text-center text-gray-400">{item.codeReduced}</td>
+                <td className="py-1 px-2 text-right">
+                  {formatCurrency(displayValue)} {item.statementGroup === 'RECEITA' ? 'C' : 'D'}
                 </td>
               </tr>
             );
@@ -121,31 +114,48 @@ export const DREReport: React.FC<DREReportProps> = ({
         </tbody>
       </table>
 
-      {/* Resumo do Resultado */}
-      <div className="border-t-2 border-black pt-3 mb-6 print:break-inside-avoid space-y-1 font-mono text-xs">
-        <div className="flex justify-between font-bold">
+      <div className="border-t-2 border-gray-900 pt-3 space-y-1.5 font-bold text-xs bg-slate-50 p-4 rounded-lg">
+        <div className="flex justify-between items-center text-gray-700">
+          <span>RECEITAS BRUTAS:</span>
+          <span className="font-mono">{formatCurrency(dreResult.grossRevenue.toNumber())} C</span>
+        </div>
+        <div className="flex justify-between items-center text-gray-700">
+          <span>(-) DEDUÇÕES DA RECEITA:</span>
+          <span className="font-mono">{formatCurrency(dreResult.deductions.toNumber())} D</span>
+        </div>
+        <div className="flex justify-between items-center text-gray-900 border-t border-gray-200 pt-1">
           <span>RECEITAS LÍQUIDAS:</span>
-          <span>{formatCurrency(Math.max(totalReceitas, 0))} C</span>
+          <span className="font-mono text-blue-700">{formatCurrency(dreResult.netRevenue.toNumber())} C</span>
         </div>
-        <div className="flex justify-between font-bold text-rose-700">
-          <span>DESPESAS + CUSTOS:</span>
-          <span>{formatCurrency(totalDespesas + cmv + icms + devolucoes)} D</span>
+        <div className="flex justify-between items-center text-gray-700">
+          <span>(-) CUSTO DAS MERCADORIAS VENDIDAS (CMV):</span>
+          <span className="font-mono">{formatCurrency(dreResult.costOfGoodsSold.toNumber())} D</span>
         </div>
-        <div className="flex justify-between font-extrabold text-sm border-t border-black pt-2 text-emerald-800">
+        <div className="flex justify-between items-center text-gray-900 border-t border-gray-200 pt-1">
+          <span>LUCRO BRUTO:</span>
+          <span className="font-mono">{formatCurrency(dreResult.grossProfit.toNumber())} C</span>
+        </div>
+        <div className="flex justify-between items-center text-gray-700">
+          <span>(-) DESPESAS OPERACIONAIS:</span>
+          <span className="font-mono">{formatCurrency(dreResult.operatingExpenses.toNumber())} D</span>
+        </div>
+        <div className="flex justify-between items-center text-gray-700">
+          <span>(-) DESPESAS FINANCEIRAS:</span>
+          <span className="font-mono">{formatCurrency(dreResult.financialExpenses.toNumber())} D</span>
+        </div>
+        <div className="flex justify-between items-center text-sm font-extrabold text-emerald-800 border-t-2 border-gray-300 pt-2">
           <span>LUCRO LÍQUIDO DO EXERCÍCIO:</span>
-          <span>R$ {formatCurrency(lucroLiquido)}</span>
+          <span className="font-mono">R$ {formatCurrency(dreResult.netIncome.toNumber())}</span>
         </div>
       </div>
 
-      {/* Assinaturas */}
-      <div className="print:break-inside-avoid mt-8">
-        <ReportSignatures
-          representativeName={company.representativeName}
-          representativeCpf={company.representativeCpf}
-          accountantName={accountant.name}
-          accountantCrc={accountant.crc}
-        />
-      </div>
+      <ReportSignatures
+        representativeName={repName}
+        representativeCpf={repCpf}
+        representativeRole={repRole}
+        accountantName={accName}
+        accountantCrc={accCrc}
+      />
     </div>
   );
 };

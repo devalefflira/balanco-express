@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { ExpenseDistributor } from '@/domain/services/ExpenseDistributor';
@@ -156,12 +156,51 @@ export default function LancamentosPage() {
     }
   };
 
-  const filteredBalances = balances.filter((item) => {
+  // Computa em tempo real os saldos das sintéticas a partir de suas analíticas filhas
+  const computedBalances = useMemo(() => {
+    const map = new Map<number, AccountingBalance>();
+    balances.forEach((b) => map.set(b.codeReduced, { ...b }));
+
+    balances
+      .filter((b) => b.accountType === 'SINTETICA')
+      .sort((a, b) => b.classification.length - a.classification.length)
+      .forEach((synthetic) => {
+        const children = balances.filter(
+          (b) =>
+            b.accountType === 'ANALITICA' &&
+            b.classification.startsWith(synthetic.classification) &&
+            b.codeReduced !== synthetic.codeReduced
+        );
+
+        const debSum = children.reduce((acc, c) => acc + (c.debitAmount || 0), 0);
+        const credSum = children.reduce((acc, c) => acc + (c.creditAmount || 0), 0);
+        const initSum = children.reduce((acc, c) => acc + (c.initialBalance || 0), 0);
+        const finalSum = children.reduce((acc, c) => acc + (c.finalBalance || 0), 0);
+
+        const target = map.get(synthetic.codeReduced);
+        if (target) {
+          target.debitAmount = debSum;
+          target.creditAmount = credSum;
+          target.initialBalance = initSum;
+          target.finalBalance = finalSum;
+        }
+      });
+
+    return Array.from(map.values());
+  }, [balances]);
+
+  const filteredBalances = computedBalances.filter((item) => {
     if (activeTab === 'ALL') return true;
     if (activeTab === 'ATIVO') return item.classification.startsWith('1');
     if (activeTab === 'PASSIVO') return item.classification.startsWith('2');
     if (activeTab === 'RESULTADO') {
-      return item.classification.startsWith('3') || item.classification.startsWith('4');
+      return (
+        item.classification.startsWith('3') ||
+        item.classification.startsWith('4') ||
+        item.statementGroup === 'RECEITA' ||
+        item.statementGroup === 'CUSTO' ||
+        item.statementGroup === 'DESPESA'
+      );
     }
     return true;
   });
@@ -485,11 +524,11 @@ export default function LancamentosPage() {
           }`}
         >
           <Layers className="w-4 h-4" />
-          Todas as Contas ({balances.length})
+          Todas as Contas ({computedBalances.length})
         </button>
       </div>
 
-      {/* Tabela de Lançamentos com CurrencyInput */}
+      {/* Tabela de Lançamentos com Edição Restrita a Analíticas */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
         <div className="xl:col-span-3 bg-white rounded-2xl border shadow-xs overflow-hidden flex flex-col">
           <div className="p-4 border-b flex items-center justify-between bg-gray-50/50">
@@ -530,7 +569,7 @@ export default function LancamentosPage() {
                         isFocused
                           ? 'bg-blue-50/80 ring-1 ring-inset ring-blue-500'
                           : isSynthetic
-                          ? 'bg-gray-50/60 font-bold text-gray-900'
+                          ? 'bg-gray-50/70 font-bold text-gray-900'
                           : 'hover:bg-blue-50/20 text-gray-800'
                       }`}
                     >
@@ -543,7 +582,7 @@ export default function LancamentosPage() {
                       {/* Saldo Anterior */}
                       <td className="py-1.5 px-3 text-right">
                         {isSynthetic ? (
-                          <span className="text-gray-500">
+                          <span className="text-gray-400 italic">
                             {formatCurrency(item.initialBalance)} {item.initialNature}
                           </span>
                         ) : (
@@ -560,7 +599,7 @@ export default function LancamentosPage() {
                       {/* Débito */}
                       <td className="py-1.5 px-3 text-right">
                         {isSynthetic ? (
-                          <span className="text-gray-500">{formatCurrency(item.debitAmount)}</span>
+                          <span className="text-gray-900 font-bold">{formatCurrency(item.debitAmount)}</span>
                         ) : (
                           <CurrencyInput
                             value={item.debitAmount}
@@ -575,7 +614,7 @@ export default function LancamentosPage() {
                       {/* Crédito */}
                       <td className="py-1.5 px-3 text-right">
                         {isSynthetic ? (
-                          <span className="text-gray-500">{formatCurrency(item.creditAmount)}</span>
+                          <span className="text-gray-900 font-bold">{formatCurrency(item.creditAmount)}</span>
                         ) : (
                           <CurrencyInput
                             value={item.creditAmount}
@@ -599,7 +638,7 @@ export default function LancamentosPage() {
           </div>
         </div>
 
-        {/* Histórico */}
+        {/* Histórico e Contrapartidas */}
         <div className="bg-white rounded-2xl border shadow-xs p-4 space-y-4 flex flex-col h-[680px]">
           <div className="flex items-center justify-between border-b pb-3">
             <div className="flex items-center gap-2">
@@ -636,7 +675,7 @@ export default function LancamentosPage() {
                 <History className="w-8 h-8 opacity-30 mb-2" />
                 <p className="font-semibold text-gray-500">Nenhuma alteração recente</p>
                 <p className="text-[10px] text-gray-400 mt-1">
-                  Altere um valor na tabela, zere o resultado ou use o Assistente Contábil.
+                  Altere um valor analítico na tabela, zere o resultado ou use o Assistente Contábil.
                 </p>
               </div>
             ) : (
@@ -686,6 +725,7 @@ export default function LancamentosPage() {
         </div>
       </div>
 
+      {/* Modal de Distribuição de Despesas */}
       {isDistributeModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">

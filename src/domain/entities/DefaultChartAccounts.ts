@@ -81,6 +81,8 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Omit<ChartAccount, 'id' | 'companyId'>[]
   { codeReduced: 728, classification: '2-1-03', description: 'Imposto a pagar/recolher', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PASSIVO', level: 3 },
   { codeReduced: 735, classification: '2-1-03-01', description: 'ICMS a recolher', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
   { codeReduced: 742, classification: '2-1-03-04', description: 'IRRF S/salário/pro-labore', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
+  { codeReduced: 770, classification: '2-1-03-06', description: 'PIS s/ receita bruta', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
+  { codeReduced: 777, classification: '2-1-03-07', description: 'COFINS a recolher', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
   { codeReduced: 749, classification: '2-1-03-09', description: 'CSLL a recolher', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
   { codeReduced: 756, classification: '2-1-03-12', description: 'IRPJ a recolher', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
   { codeReduced: 812, classification: '2-1-04', description: 'Salários e contribuições previdenciárias', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PASSIVO', level: 3 },
@@ -92,17 +94,19 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Omit<ChartAccount, 'id' | 'companyId'>[]
   { codeReduced: 910, classification: '2-1-08', description: 'Provisões', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PASSIVO', level: 3 },
   { codeReduced: 917, classification: '2-1-08-01', description: '13º Salário a pagar', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
   { codeReduced: 924, classification: '2-1-08-02', description: 'Férias a pagar', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
-  { codeReduced: 2632, classification: '2-1-09', description: 'Outras Contas', accountType: 'SINTETICA', nature: 'D', statementGroup: 'PASSIVO', level: 3 },
-  { codeReduced: 2681, classification: '2-1-09-06', description: 'Parcelamento INSS - PGFN', accountType: 'ANALITICA', nature: 'D', statementGroup: 'PASSIVO', level: 4 },
-  { codeReduced: 2688, classification: '2-1-09-07', description: 'Parcelamento INSS', accountType: 'ANALITICA', nature: 'D', statementGroup: 'PASSIVO', level: 4 },
-  { codeReduced: 3103, classification: '2-1-11', description: 'Parcelamentos', accountType: 'SINTETICA', nature: 'D', statementGroup: 'PASSIVO', level: 3 },
-  { codeReduced: 3109, classification: '2-1-11-01', description: 'Parcelamento DARF', accountType: 'ANALITICA', nature: 'D', statementGroup: 'PASSIVO', level: 4 },
+  { codeReduced: 2632, classification: '2-1-09', description: 'Outras Contas', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PASSIVO', level: 3 },
+  { codeReduced: 2681, classification: '2-1-09-06', description: 'Parcelamento INSS - PGFN', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
+  { codeReduced: 2688, classification: '2-1-09-07', description: 'Parcelamento INSS', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
+  { codeReduced: 3103, classification: '2-1-11', description: 'Parcelamentos', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PASSIVO', level: 3 },
+  { codeReduced: 3109, classification: '2-1-11-01', description: 'Parcelamento DARF', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
 
   // 2-2. PASSIVO NÃO CIRCULANTE
   { codeReduced: 2569, classification: '2-2', description: 'Passivo não Circulante', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PASSIVO', level: 2 },
   { codeReduced: 2576, classification: '2-2-01', description: 'Empréstimo Bancário a longo prazo', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PASSIVO', level: 3 },
   { codeReduced: 2607, classification: '2-2-01-05', description: 'Empréstimo Sicoob', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
+  { codeReduced: 2614, classification: '2-2-01-08', description: 'Empréstimo Bradesco', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
   { codeReduced: 2613, classification: '2-2-01-09', description: 'Empréstimo Tribanco', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
+  { codeReduced: 2615, classification: '2-2-01-10', description: 'Fornecedores / Financiamentos Longo Prazo', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PASSIVO', level: 4 },
 
   // 2-4. PATRIMÔNIO LÍQUIDO
   { codeReduced: 931, classification: '2-4', description: 'Patrimônio líquido', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PL', level: 2 },
@@ -112,26 +116,32 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Omit<ChartAccount, 'id' | 'companyId'>[]
   { codeReduced: 1939, classification: '2-4-04-03', description: 'Fundo p/Aumento de Capital', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PL', level: 4 },
   { codeReduced: 1008, classification: '2-4-06', description: 'Reservas de lucros', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PL', level: 3 },
   { codeReduced: 2471, classification: '2-4-06-04', description: 'Reserva Legal', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PL', level: 4 },
-  { codeReduced: 2478, classification: '2-4-06-05', description: 'Reserva para Contingências', accountType: 'ANALITICA', nature: 'D', statementGroup: 'PL', level: 4 },
+  { codeReduced: 2478, classification: '2-4-06-05', description: 'Reserva para Contingências', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PL', level: 4 },
   { codeReduced: 1023, classification: '2-4-08', description: 'Prejuízos acumulados', accountType: 'SINTETICA', nature: 'C', statementGroup: 'PL', level: 3 },
   { codeReduced: 1029, classification: '2-4-08-01', description: 'Lucro / Prejuízo do Período', accountType: 'ANALITICA', nature: 'C', statementGroup: 'PL', level: 4 },
   { codeReduced: 1043, classification: '2-4-08-02', description: 'Prejuízo Acumulado', accountType: 'ANALITICA', nature: 'D', statementGroup: 'PL', level: 4 },
 
   // ==========================================
-  // 3. RECEITAS E CUSTOS (DRE)
+  // 3. RECEITAS (DRE)
   // ==========================================
   { codeReduced: 1176, classification: '3', description: 'Receita', accountType: 'SINTETICA', nature: 'C', statementGroup: 'RECEITA', level: 1 },
   { codeReduced: 1183, classification: '3-1', description: 'Receita bruta s/ vendas e serviços', accountType: 'SINTETICA', nature: 'C', statementGroup: 'RECEITA', level: 2 },
   { codeReduced: 1190, classification: '3-1-01', description: 'Receita bruta de venda', accountType: 'SINTETICA', nature: 'C', statementGroup: 'RECEITA', level: 3 },
   { codeReduced: 1211, classification: '3-1-01-03', description: 'Revenda de mercadorias', accountType: 'ANALITICA', nature: 'C', statementGroup: 'RECEITA', level: 4 },
 
-  // Deduções e Custo
+  // Deduções da Receita Bruta (Exclusivo Tributos e Devoluções)
   { codeReduced: 1232, classification: '3-2', description: 'Dedução de receita bruta vendas/serviços', accountType: 'SINTETICA', nature: 'D', statementGroup: 'RECEITA', level: 2 },
   { codeReduced: 1239, classification: '3-2-01', description: 'Dedução de receita bruta de vendas', accountType: 'SINTETICA', nature: 'D', statementGroup: 'RECEITA', level: 3 },
   { codeReduced: 1260, classification: '3-2-01-03', description: 'ICMS', accountType: 'ANALITICA', nature: 'D', statementGroup: 'RECEITA', level: 4 },
+  { codeReduced: 1267, classification: '3-2-01-04', description: 'COFINS', accountType: 'ANALITICA', nature: 'D', statementGroup: 'RECEITA', level: 4 },
+  { codeReduced: 1274, classification: '3-2-01-05', description: 'PIS s/ vendas e servicos', accountType: 'ANALITICA', nature: 'D', statementGroup: 'RECEITA', level: 4 },
   { codeReduced: 1280, classification: '3-2-01-06', description: 'Devolução de Mercadoria', accountType: 'ANALITICA', nature: 'D', statementGroup: 'RECEITA', level: 4 },
-  { codeReduced: 1967, classification: '3-2-03', description: 'Custo Mercadoria Vendida', accountType: 'SINTETICA', nature: 'D', statementGroup: 'CUSTO', level: 3 },
-  { codeReduced: 1974, classification: '3-2-03-03', description: 'Custo Mercadoria Vendida', accountType: 'ANALITICA', nature: 'D', statementGroup: 'CUSTO', level: 4 },
+
+  // ==========================================
+  // 4. CUSTO DAS MERCADORIAS VENDIDAS (CUSTO)
+  // ==========================================
+  { codeReduced: 1967, classification: '3-3', description: 'Custo Mercadoria Vendida', accountType: 'SINTETICA', nature: 'D', statementGroup: 'CUSTO', level: 2 },
+  { codeReduced: 1974, classification: '3-3-01', description: 'Custo Mercadoria Vendida', accountType: 'ANALITICA', nature: 'D', statementGroup: 'CUSTO', level: 3 },
 
   // Receitas Operacionais e Não Operacionais
   { codeReduced: 1295, classification: '3-4', description: 'Receita operacional', accountType: 'SINTETICA', nature: 'C', statementGroup: 'RECEITA', level: 2 },
@@ -142,7 +152,7 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Omit<ChartAccount, 'id' | 'companyId'>[]
   { codeReduced: 1442, classification: '3-5-01-02', description: 'Bonificação em mercadoria', accountType: 'ANALITICA', nature: 'C', statementGroup: 'RECEITA', level: 4 },
 
   // ==========================================
-  // 4. DESPESAS OPERACIONAIS
+  // 5. DESPESAS OPERACIONAIS
   // ==========================================
   { codeReduced: 1449, classification: '4', description: 'Despesas Operacionais', accountType: 'SINTETICA', nature: 'D', statementGroup: 'DESPESA', level: 1 },
   { codeReduced: 1456, classification: '4-1', description: 'Despesas Operacionais', accountType: 'SINTETICA', nature: 'D', statementGroup: 'DESPESA', level: 2 },

@@ -1,52 +1,38 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { BalancoReport } from '@/components/reports/BalancoReport';
 import { ReportPeriodSelector } from '@/components/reports/ReportPeriodSelector';
-import { Printer, ArrowLeft } from 'lucide-react';
+import { Printer } from 'lucide-react';
 
 export default function BalancoPage() {
-  const { company, accountant, period, balances, formatPeriodText } = useAccounting();
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const periodText = `Exercício de ${formatPeriodText(period.startDate, period.endDate)}`;
+  const { balances, company, accountant, formatPeriodText } = useAccounting();
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
-        <Link
-          href="/lancamentos-salvos"
-          className="inline-flex items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-900 transition"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Ver Lançamentos Salvos
-        </Link>
+    <div className="p-6 max-w-[1400px] mx-auto space-y-4">
+      <div className="flex items-center justify-between print:hidden">
+        <div>
+          <h1 className="text-lg font-bold text-gray-900">Relatório: Balanço Patrimonial</h1>
+          <p className="text-xs text-gray-500">Visualização oficial do Balanço de encerramento do exercício.</p>
+        </div>
         <button
-          onClick={handlePrint}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow transition"
+          onClick={() => window.print()}
+          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition"
         >
           <Printer className="w-4 h-4" />
-          Imprimir Balanço (PDF)
+          Imprimir / Salvar PDF
         </button>
       </div>
 
-      <div className="print:hidden">
-        <ReportPeriodSelector />
-      </div>
+      <ReportPeriodSelector />
 
-      <div className="bg-white rounded-2xl border shadow-sm print:border-none print:shadow-none">
-        <BalancoReport
-          company={company}
-          accountant={accountant}
-          periodText={periodText}
-          balances={balances}
-        />
-      </div>
+      <BalancoReport
+        balances={balances}
+        company={company}
+        accountant={accountant}
+        periodText={formatPeriodText()}
+      />
     </div>
   );
 }
