@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
+import { AccountingEngine } from '@/domain/services/AccountingEngine';
 import { formatCurrency } from '@/lib/formatters';
 import { ReportSignatures } from './ReportSignatures';
 import { CompanyData, AccountantData } from '@/domain/context/AccountingContext';
@@ -61,40 +62,17 @@ export const BalanceteReport: React.FC<BalanceteReportProps> = ({
   const totalDebits = analytical.reduce((sum, b) => sum + (Number(b.debitAmount) || 0), 0);
   const totalCredits = analytical.reduce((sum, b) => sum + (Number(b.creditAmount) || 0), 0);
 
-  const ativoTotal = analytical
-    .filter((b) => b.classification.startsWith('1') || b.statementGroup === 'ATIVO')
-    .reduce((sum, b) => sum + (b.finalNature === 'C' ? -(b.finalBalance || 0) : (b.finalBalance || 0)), 0);
+  const dreResult = AccountingEngine.calculateDRE(balances);
+  const bsResult = AccountingEngine.calculateBalanceSheet(balances);
 
-  const passivoTotal = analytical
-    .filter(
-      (b) =>
-        (b.classification.startsWith('2') || b.statementGroup === 'PASSIVO' || b.statementGroup === 'PL') &&
-        b.codeReduced !== 1029
-    )
-    .reduce((sum, b) => sum + (b.finalNature === 'D' ? -(b.finalBalance || 0) : (b.finalBalance || 0)), 0);
+  const despesasTotal = dreResult.operatingExpenses.toNumber();
+  const custosTotal = dreResult.costOfGoodsSold.toNumber();
+  const receitasTotal = dreResult.grossRevenue.toNumber();
+  const deducoesTotal = dreResult.deductions.toNumber();
+  const resultadoOperacional = dreResult.netIncome.toNumber();
 
-  const despesasTotal = analytical
-    .filter((b) => b.statementGroup === 'DESPESA' || b.classification.startsWith('4'))
-    .reduce((sum, b) => sum + (b.debitAmount || b.finalBalance || 0), 0);
-
-  const custosTotal = analytical
-    .filter((b) => b.statementGroup === 'CUSTO' || b.classification.startsWith('3-3') || b.classification.startsWith('3-2-03'))
-    .reduce((sum, b) => sum + (b.debitAmount || b.finalBalance || 0), 0);
-
-  const receitasTotal = analytical
-    .filter(
-      (b) =>
-        (b.statementGroup === 'RECEITA' || b.classification.startsWith('3')) &&
-        !b.classification.startsWith('3-2') &&
-        !b.classification.startsWith('3-3')
-    )
-    .reduce((sum, b) => sum + (b.creditAmount || b.finalBalance || 0), 0);
-
-  const deducoesTotal = analytical
-    .filter((b) => b.classification.startsWith('3-2'))
-    .reduce((sum, b) => sum + (b.debitAmount || b.finalBalance || 0), 0);
-
-  const resultadoOperacional = receitasTotal - deducoesTotal - custosTotal - despesasTotal;
+  const ativoTotal = bsResult.totalAssets.toNumber();
+  const passivoPLTotal = bsResult.totalLiabilities.plus(bsResult.equity).toNumber();
 
   const getSyntheticValue = (item: AccountingBalance, field: 'initialBalance' | 'debitAmount' | 'creditAmount' | 'finalBalance') => {
     if (item.accountType === 'ANALITICA') {
@@ -106,6 +84,16 @@ export const BalanceteReport: React.FC<BalanceteReportProps> = ({
         b.classification.startsWith(item.classification) &&
         b.codeReduced !== item.codeReduced
     );
+
+    if (field === 'finalBalance') {
+      return children.reduce((sum, c) => {
+        if (item.classification.startsWith('1') && (c.classification.startsWith('1-2-04') || c.finalNature === 'C')) {
+          return sum - (c.finalBalance || 0);
+        }
+        return sum + (c.finalBalance || 0);
+      }, 0);
+    }
+
     return children.reduce((sum, c) => sum + (Number(c[field]) || 0), 0);
   };
 
@@ -153,7 +141,7 @@ export const BalanceteReport: React.FC<BalanceteReportProps> = ({
                 <td className="py-1 px-2 text-right">{formatCurrency(deb)}</td>
                 <td className="py-1 px-2 text-right">{formatCurrency(cred)}</td>
                 <td className="py-1 px-2 text-right font-bold">
-                  {formatCurrency(finalBal)} {item.finalNature || 'D'}
+                  {formatCurrency(finalBal)} {item.finalNature || (item.classification.startsWith('1-2-04') ? 'C' : 'D')}
                 </td>
               </tr>
             );
@@ -161,6 +149,7 @@ export const BalanceteReport: React.FC<BalanceteReportProps> = ({
         </tbody>
       </table>
 
+      {/* Quadro Consolidado de Fechamento Integrado ao Balanço */}
       <div className="border-2 border-gray-900 rounded-xl p-4 bg-slate-50 space-y-3">
         <h3 className="text-xs font-black uppercase tracking-wider text-gray-900 text-center border-b pb-2">
           Análise do Balancete e Fechamento
@@ -172,7 +161,7 @@ export const BalanceteReport: React.FC<BalanceteReportProps> = ({
           </div>
           <div>
             <span className="text-gray-500 block text-[10px] uppercase font-sans font-bold">Passivo + PL:</span>
-            <span className="font-bold text-gray-900">{formatCurrency(passivoTotal)} C</span>
+            <span className="font-bold text-gray-900">{formatCurrency(passivoPLTotal)} C</span>
           </div>
           <div>
             <span className="text-gray-500 block text-[10px] uppercase font-sans font-bold">Receitas:</span>
