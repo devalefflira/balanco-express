@@ -27,12 +27,6 @@ export interface BalanceSheetResult {
 }
 
 export class AccountingEngine {
-  /**
-   * Calcula o Saldo Atual matematicamente:
-   * Contas devedoras (D): Saldo = Saldo Anterior (D) + Débitos - Créditos
-   * Contas credoras (C):  Saldo = Saldo Anterior (C) + Créditos - Débitos
-   * Se Débito == Crédito e Saldo Anterior == 0, o Saldo Atual é OBRIGATORIAMENTE 0,00.
-   */
   public static calculateFinalBalance(
     initialBalance: number,
     initialNature: 'D' | 'C',
@@ -52,7 +46,6 @@ export class AccountingEngine {
       netValue = initial.plus(cred).minus(deb);
     }
 
-    // Se o valor líquido for zero (débito == crédito com saldo inicial zerado)
     if (netValue.abs().lessThan(0.0001)) {
       return { balance: 0, nature: accountNature };
     }
@@ -70,11 +63,6 @@ export class AccountingEngine {
     }
   }
 
-  /**
-   * Apura a DRE com base na movimentação contábil real do exercício:
-   * Receitas: Créditos acumulados ou Saldo
-   * Despesas/Custos: Débitos acumulados ou Saldo
-   */
   public static calculateDRE(balances: AccountingBalance[]): DREResult {
     let grossRevenue = new Decimal(0);
     let deductions = new Decimal(0);
@@ -86,7 +74,6 @@ export class AccountingEngine {
     const analytical = balances.filter(b => b.accountType === 'ANALITICA');
 
     for (const item of analytical) {
-      // Pega o movimento real: se for despesa pega o débito, se for receita pega o crédito
       const movVal = new Decimal(
         item.statementGroup === 'RECEITA'
           ? (item.creditAmount || item.finalBalance || 0)
@@ -136,49 +123,28 @@ export class AccountingEngine {
     const analytical = balances.filter(b => b.accountType === 'ANALITICA');
     const dreResult = this.calculateDRE(balances);
 
-    const hasRecordedPeriodResult = analytical.some(
-      b => b.classification.startsWith('2-4-08') && (b.finalBalance || 0) > 0
-    );
+    const recordedPeriodResult = analytical.find(b => b.classification.startsWith('2-4-08-01'));
+    const hasRecordedResult = recordedPeriodResult && (recordedPeriodResult.finalBalance || 0) > 0;
 
     for (const item of analytical) {
       const val = new Decimal(item.finalBalance || 0);
 
       if (item.classification.startsWith('1-1')) {
-        if (item.finalNature === 'C') {
-          currentAssets = currentAssets.minus(val);
-        } else {
-          currentAssets = currentAssets.plus(val);
-        }
+        currentAssets = item.finalNature === 'C' ? currentAssets.minus(val) : currentAssets.plus(val);
       } else if (item.classification.startsWith('1-2')) {
-        if (item.finalNature === 'C') {
-          nonCurrentAssets = nonCurrentAssets.minus(val);
-        } else {
-          nonCurrentAssets = nonCurrentAssets.plus(val);
-        }
+        nonCurrentAssets = item.finalNature === 'C' ? nonCurrentAssets.minus(val) : nonCurrentAssets.plus(val);
       } else if (item.classification.startsWith('2-1')) {
-        if (item.finalNature === 'D') {
-          currentLiabilities = currentLiabilities.minus(val);
-        } else {
-          currentLiabilities = currentLiabilities.plus(val);
-        }
+        currentLiabilities = item.finalNature === 'D' ? currentLiabilities.minus(val) : currentLiabilities.plus(val);
       } else if (item.classification.startsWith('2-2')) {
-        if (item.finalNature === 'D') {
-          nonCurrentLiabilities = nonCurrentLiabilities.minus(val);
-        } else {
-          nonCurrentLiabilities = nonCurrentLiabilities.plus(val);
-        }
+        nonCurrentLiabilities = item.finalNature === 'D' ? nonCurrentLiabilities.minus(val) : nonCurrentLiabilities.plus(val);
       } else if (item.classification.startsWith('2-4')) {
-        if (item.finalNature === 'D') {
-          equity = equity.minus(val);
-        } else {
-          equity = equity.plus(val);
-        }
+        equity = item.finalNature === 'D' ? equity.minus(val) : equity.plus(val);
       }
     }
 
     const totalAssets = currentAssets.plus(nonCurrentAssets);
     const totalLiabilities = currentLiabilities.plus(nonCurrentLiabilities);
-    const totalEquity = hasRecordedPeriodResult ? equity : equity.plus(dreResult.netIncome);
+    const totalEquity = hasRecordedResult ? equity : equity.plus(dreResult.netIncome);
 
     const totalLiabilitiesAndEquity = totalLiabilities.plus(totalEquity);
     const discrepancy = totalAssets.minus(totalLiabilitiesAndEquity);
@@ -196,5 +162,44 @@ export class AccountingEngine {
       isBalanced,
       discrepancy
     };
+  }
+
+  /**
+   * Realiza o Zeramento de Resultado: iguala o Crédito ao Débito em Despesas/Custos
+   * e o Débito ao Crédito em Receitas, transferindo a contrapartida para o PL (2-4-08-01).
+   */
+  public static closeResultAccounts(balances: AccountingBalance[]): AccountingBalance[] {
+    const list = balances.map(b => ({ ...b }));
+    const dreResult = this.calculateDRE(list);
+
+    for (const item of list) {
+      if (item.statementGroup === 'DESPESA' || item.statementGroup === 'CUSTO') {
+        if (item.accountType === 'ANALITICA') {
+          const deb = item.debitAmount || item.finalBalance || 0;
+          item.creditAmount = deb;
+          item.finalBalance = 0;
+          item.finalNature = 'D';
+        }
+      } else if (item.statementGroup === 'RECEITA') {
+        if (item.accountType === 'ANALITICA') {
+          const cred = item.creditAmount || item.finalBalance || 0;
+          item.debitAmount = cred;
+          item.finalBalance = 0;
+          item.finalNature = 'C';
+        }
+      }
+    }
+
+    // Amarra o Lucro/Prejuízo Líquido na conta 2-4-08-01
+    const resultAcc = list.find(b => b.classification.startsWith('2-4-08-01') || b.codeReduced === 1029);
+    if (resultAcc) {
+      const netVal = dreResult.netIncome.toNumber();
+      resultAcc.creditAmount = netVal >= 0 ? netVal : 0;
+      resultAcc.debitAmount = netVal < 0 ? Math.abs(netVal) : 0;
+      resultAcc.finalBalance = Math.abs(netVal);
+      resultAcc.finalNature = netVal >= 0 ? 'C' : 'D';
+    }
+
+    return list;
   }
 }

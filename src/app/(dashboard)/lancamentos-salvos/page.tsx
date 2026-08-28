@@ -16,7 +16,8 @@ import {
   Lock,
   Unlock,
   CheckCircle,
-  ArrowRight,
+  PlusCircle,
+  X,
 } from 'lucide-react';
 
 export default function LancamentosSalvosPage() {
@@ -26,6 +27,7 @@ export default function LancamentosSalvosPage() {
     loadSavedPeriod,
     deleteSavedPeriod,
     syncChartOfAccounts,
+    createNewBlankPeriod,
     togglePeriodClose,
     isLoading,
   } = useAccounting();
@@ -34,6 +36,24 @@ export default function LancamentosSalvosPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [forwardNotice, setForwardNotice] = useState<string | null>(null);
+
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    description: 'Exercício 01/01/2026 a 31/12/2026',
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+  });
+
+  const handleStartManualCreation = (e: React.FormEvent) => {
+    e.preventDefault();
+    createNewBlankPeriod({
+      description: manualForm.description,
+      startDate: manualForm.startDate,
+      endDate: manualForm.endDate,
+    });
+    setIsManualModalOpen(false);
+    router.push('/lancamentos');
+  };
 
   const handleEdit = async (periodId: string) => {
     try {
@@ -137,26 +157,36 @@ export default function LancamentosSalvosPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Cabeçalho com botão de sincronização */}
+      {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">
             <FolderKanban className="w-6 h-6 text-blue-600" />
-            Lançamentos Importados
+            Lançamentos Importados e Manuais
           </h1>
           <p className="text-xs text-gray-500">
-            Gerencie, sincronize contas e edite os fechamentos contábeis
+            Gerencie, crie e edite os fechamentos contábeis
           </p>
         </div>
 
-        <button
-          onClick={handleSyncAll}
-          disabled={isLoading}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-2 transition disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          Sincronizar Plano de Contas
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsManualModalOpen(true)}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2 transition"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            + Novo Balancete
+          </button>
+
+          <button
+            onClick={handleSyncAll}
+            disabled={isLoading}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2 transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            Sincronizar Plano
+          </button>
+        </div>
       </div>
 
       {syncFeedback && (
@@ -167,20 +197,20 @@ export default function LancamentosSalvosPage() {
       )}
 
       {forwardNotice && (
-        <div className="p-4 bg-sky-50 border border-sky-200 text-sky-900 rounded-xl text-xs flex items-center gap-2 shadow-sm animate-in fade-in">
+        <div className="p-4 bg-sky-50 border border-sky-200 text-sky-900 rounded-xl text-xs flex items-center gap-2 shadow-xs animate-in fade-in">
           <Sparkles className="w-5 h-5 text-sky-600 flex-shrink-0" />
           <span className="font-medium">{forwardNotice}</span>
         </div>
       )}
 
       {/* Tabela de Lançamentos */}
-      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border shadow-xs overflow-hidden">
         {savedPeriods.length === 0 ? (
           <div className="p-12 text-center text-gray-400 text-xs flex flex-col items-center justify-center gap-2">
             <FolderKanban className="w-10 h-10 opacity-30" />
             <p className="font-semibold text-gray-600">Nenhum lançamento importado ou salvo.</p>
             <p className="text-[11px] text-gray-400">
-              Importe uma planilha pelo menu Importar Arquivos.
+              Clique em "+ Novo Balancete" ou importe um arquivo pelo menu Importar Arquivos.
             </p>
           </div>
         ) : (
@@ -243,7 +273,6 @@ export default function LancamentosSalvosPage() {
                       </td>
 
                       <td className="py-3 px-4 text-right space-x-2">
-                        {/* Botão Finalizar / Reabrir */}
                         <button
                           onClick={() => handleToggleStatus(item)}
                           disabled={togglingId === item.id}
@@ -282,6 +311,84 @@ export default function LancamentosSalvosPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Criar Balancete */}
+      {isManualModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b bg-gray-50/60 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <PlusCircle className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-sm font-bold text-gray-900">Novo Balancete Manual</h3>
+              </div>
+              <button
+                onClick={() => setIsManualModalOpen(false)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleStartManualCreation} className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Descrição do Exercício</label>
+                <input
+                  type="text"
+                  required
+                  value={manualForm.description}
+                  onChange={(e) => setManualForm({ ...manualForm, description: e.target.value })}
+                  placeholder="Ex: Exercício 01/01/2026 a 31/12/2026"
+                  className="w-full p-2.5 border rounded-xl font-medium focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1">Data Inicial</label>
+                  <input
+                    type="date"
+                    required
+                    value={manualForm.startDate}
+                    onChange={(e) => setManualForm({ ...manualForm, startDate: e.target.value })}
+                    className="w-full p-2.5 border rounded-xl font-medium focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1">Data Final</label>
+                  <input
+                    type="date"
+                    required
+                    value={manualForm.endDate}
+                    onChange={(e) => setManualForm({ ...manualForm, endDate: e.target.value })}
+                    className="w-full p-2.5 border rounded-xl font-medium focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-[11px] leading-relaxed">
+                Um novo exercício será inicializado em branco com todas as contas zeradas para digitação.
+              </div>
+
+              <div className="pt-3 border-t flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsManualModalOpen(false)}
+                  className="px-4 py-2 border rounded-xl font-bold text-gray-600 hover:bg-gray-50 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs transition"
+                >
+                  Criar e Iniciar Edição
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

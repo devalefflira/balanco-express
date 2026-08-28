@@ -3,12 +3,13 @@
 import React, { useState } from 'react';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { ChartAccount } from '@/domain/entities/ChartAccount';
-import { ListTree, Plus, Search, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ListTree, Plus, Search, X, CheckCircle2, AlertCircle, Edit, Trash2 } from 'lucide-react';
 
 export default function PlanoContasPage() {
-  const { balances, addNewAccount } = useAccounting();
+  const { balances, addNewAccount, editAccount, deleteAccount } = useAccounting();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCode, setEditingCode] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -37,69 +38,8 @@ export default function PlanoContasPage() {
       String(acc.codeReduced).includes(searchTerm)
   );
 
-  const handleGroupChange = (group: typeof formData.statementGroup) => {
-    let defaultNature: 'D' | 'C' = 'D';
-    if (group === 'PASSIVO' || group === 'PL' || group === 'RECEITA') {
-      defaultNature = 'C';
-    }
-    setFormData((prev) => ({
-      ...prev,
-      statementGroup: group,
-      nature: defaultNature,
-    }));
-  };
-
-  const handleClassificationChange = (cls: string) => {
-    const dotsCount = cls.split('-').length;
-    setFormData((prev) => ({
-      ...prev,
-      classification: cls,
-      level: dotsCount || 1,
-    }));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-
-    const code = parseInt(formData.codeReduced, 10);
-    if (!code || isNaN(code)) {
-      setErrorMessage('Informe um código reduzido numérico válido.');
-      return;
-    }
-
-    if (!formData.classification.trim()) {
-      setErrorMessage('Informe a classificação contábil (ex: 4-1-02-60).');
-      return;
-    }
-
-    if (!formData.description.trim()) {
-      setErrorMessage('Informe a descrição da conta.');
-      return;
-    }
-
-    const alreadyExists = balances.some(
-      (b) => b.codeReduced === code || b.classification === formData.classification.trim()
-    );
-    if (alreadyExists) {
-      setErrorMessage('Já existe uma conta cadastrada com este código reduzido ou classificação.');
-      return;
-    }
-
-    const accountToAdd: Omit<ChartAccount, 'id' | 'companyId'> = {
-      codeReduced: code,
-      classification: formData.classification.trim(),
-      description: formData.description.trim(),
-      accountType: formData.accountType,
-      nature: formData.nature,
-      statementGroup: formData.statementGroup,
-      level: formData.level,
-    };
-
-    addNewAccount(accountToAdd);
-
-    setSuccessMessage(`Conta [${code}] ${formData.description} cadastrada e adicionada com sucesso!`);
-    setIsModalOpen(false);
+  const handleOpenCreate = () => {
+    setEditingCode(null);
     setFormData({
       codeReduced: '',
       classification: '',
@@ -109,13 +49,74 @@ export default function PlanoContasPage() {
       statementGroup: 'DESPESA',
       level: 4,
     });
+    setErrorMessage(null);
+    setIsModalOpen(true);
+  };
 
-    setTimeout(() => setSuccessMessage(null), 4000);
+  const handleOpenEdit = (item: typeof balances[0]) => {
+    setEditingCode(item.codeReduced);
+    setFormData({
+      codeReduced: String(item.codeReduced),
+      classification: item.classification,
+      description: item.description,
+      accountType: item.accountType,
+      nature: item.finalNature,
+      statementGroup: item.statementGroup,
+      level: item.classification.split('-').length,
+    });
+    setErrorMessage(null);
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = async (code: number, desc: string) => {
+    if (!confirm(`Deseja realmente excluir a conta [${code}] ${desc}?`)) return;
+    try {
+      await deleteAccount(code);
+      setSuccessMessage(`Conta [${code}] excluída com sucesso!`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (e: any) {
+      alert(`Erro ao excluir: ${e.message}`);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    const code = parseInt(formData.codeReduced, 10);
+    if (!code || isNaN(code)) {
+      setErrorMessage('Informe um código reduzido válido.');
+      return;
+    }
+
+    try {
+      const accountPayload: Omit<ChartAccount, 'id' | 'companyId'> = {
+        codeReduced: code,
+        classification: formData.classification.trim(),
+        description: formData.description.trim(),
+        accountType: formData.accountType,
+        nature: formData.nature,
+        statementGroup: formData.statementGroup,
+        level: formData.level,
+      };
+
+      if (editingCode) {
+        await editAccount(accountPayload);
+        setSuccessMessage(`Conta [${code}] atualizada com sucesso!`);
+      } else {
+        addNewAccount(accountPayload);
+        setSuccessMessage(`Conta [${code}] cadastrada com sucesso!`);
+      }
+
+      setIsModalOpen(false);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      setErrorMessage(err.message);
+    }
   };
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Cabeçalho */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">
@@ -128,10 +129,7 @@ export default function PlanoContasPage() {
         </div>
 
         <button
-          onClick={() => {
-            setErrorMessage(null);
-            setIsModalOpen(true);
-          }}
+          onClick={handleOpenCreate}
           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-sm transition"
         >
           <Plus className="w-4 h-4" />
@@ -146,7 +144,6 @@ export default function PlanoContasPage() {
         </div>
       )}
 
-      {/* Caixa de Pesquisa e Tabela */}
       <div className="bg-white rounded-2xl border shadow-sm overflow-hidden space-y-4 p-5">
         <div className="relative">
           <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" />
@@ -169,6 +166,7 @@ export default function PlanoContasPage() {
                 <th className="py-2.5 px-3 text-center w-28">Tipo</th>
                 <th className="py-2.5 px-3 text-center w-20">Natureza</th>
                 <th className="py-2.5 px-3 text-center w-28">Grupo</th>
+                <th className="py-2.5 px-3 text-right w-24">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-mono">
@@ -203,6 +201,22 @@ export default function PlanoContasPage() {
                     <td className="py-2 px-3 text-center font-sans text-[11px] text-gray-600 font-semibold">
                       {item.statementGroup}
                     </td>
+                    <td className="py-2 px-3 text-right space-x-1 font-sans">
+                      <button
+                        onClick={() => handleOpenEdit(item)}
+                        className="p-1 hover:bg-blue-50 rounded text-blue-600 transition"
+                        title="Editar Conta"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(item.codeReduced, item.description)}
+                        className="p-1 hover:bg-rose-50 rounded text-rose-600 transition"
+                        title="Excluir Conta"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -211,14 +225,15 @@ export default function PlanoContasPage() {
         </div>
       </div>
 
-      {/* Modal de Nova Conta */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-5 border-b bg-gray-50/60 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Plus className="w-5 h-5 text-blue-600" />
-                <h3 className="text-sm font-bold text-gray-900">Cadastrar Nova Conta</h3>
+                <h3 className="text-sm font-bold text-gray-900">
+                  {editingCode ? `Editar Conta [${editingCode}]` : 'Cadastrar Nova Conta'}
+                </h3>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
@@ -241,7 +256,7 @@ export default function PlanoContasPage() {
                   <label className="font-bold text-gray-700 block mb-1">Grupo Contábil</label>
                   <select
                     value={formData.statementGroup}
-                    onChange={(e) => handleGroupChange(e.target.value as any)}
+                    onChange={(e) => setFormData({ ...formData, statementGroup: e.target.value as any })}
                     className="w-full p-2.5 border rounded-xl bg-white font-medium focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="ATIVO">1 - Ativo</option>
@@ -271,11 +286,11 @@ export default function PlanoContasPage() {
                   <label className="font-bold text-gray-700 block mb-1">Código Reduzido</label>
                   <input
                     type="number"
-                    placeholder="Ex: 3200"
+                    disabled={!!editingCode}
                     value={formData.codeReduced}
                     onChange={(e) => setFormData({ ...formData, codeReduced: e.target.value })}
                     required
-                    className="w-full p-2.5 border rounded-xl font-mono focus:ring-1 focus:ring-blue-500"
+                    className="w-full p-2.5 border rounded-xl font-mono focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
                   />
                 </div>
 
@@ -283,9 +298,8 @@ export default function PlanoContasPage() {
                   <label className="font-bold text-gray-700 block mb-1">Classificação</label>
                   <input
                     type="text"
-                    placeholder="Ex: 4-1-02-60"
                     value={formData.classification}
-                    onChange={(e) => handleClassificationChange(e.target.value)}
+                    onChange={(e) => setFormData({ ...formData, classification: e.target.value })}
                     required
                     className="w-full p-2.5 border rounded-xl font-mono focus:ring-1 focus:ring-blue-500"
                   />
@@ -296,7 +310,6 @@ export default function PlanoContasPage() {
                 <label className="font-bold text-gray-700 block mb-1">Descrição da Conta</label>
                 <input
                   type="text"
-                  placeholder="Ex: Despesas com Softwares e Licenças"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   required
@@ -342,7 +355,7 @@ export default function PlanoContasPage() {
                   type="submit"
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm transition"
                 >
-                  Criar e Adicionar Conta
+                  {editingCode ? 'Salvar Alterações' : 'Criar Conta'}
                 </button>
               </div>
             </form>

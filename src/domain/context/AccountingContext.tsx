@@ -80,7 +80,11 @@ interface AccountingContextType {
   updateBalance: (codeReduced: number, field: keyof AccountingBalance, value: any) => void;
   recordHistoryEntry: (codeReduced: number, field: string, prevVal: number, newVal: number, snapshot: AccountingBalance[]) => void;
   addNewAccount: (newAccount: Omit<ChartAccount, 'id' | 'companyId'>) => void;
+  editAccount: (account: Omit<ChartAccount, 'id' | 'companyId'>) => Promise<void>;
+  deleteAccount: (codeReduced: number) => Promise<void>;
   syncChartOfAccounts: () => Promise<number>;
+  createNewBlankPeriod: (periodInfo: { description: string; startDate: string; endDate: string }) => void;
+  closeResultAccountsAction: () => void;
   distributeExpenseAccount: (sourceCodeReduced: number, percentage: number) => ExpenseDistributionResult;
   togglePeriodClose: (periodId: string, currentStatus: string) => Promise<{ nextPeriodUpdated?: string; accountsForwarded?: number }>;
   applyAutoBalance: () => void;
@@ -127,9 +131,9 @@ const initialAccountant: AccountantData = {
 };
 
 const initialPeriod: AccountingPeriodData = {
-  description: 'Exercício 01/01/2024 a 31/12/2024',
-  startDate: '2024-01-01',
-  endDate: '2024-12-31',
+  description: 'Exercício 01/01/2026 a 31/12/2026',
+  startDate: '2026-01-01',
+  endDate: '2026-12-31',
   status: 'OPEN',
   sourceType: 'MANUAL',
 };
@@ -188,7 +192,6 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         totalDebit += child.debitAmount || 0;
         totalCredit += child.creditAmount || 0;
 
-        // Cálculo com respeito à natureza contábil no Saldo Anterior
         if (syn.statementGroup === 'ATIVO') {
           totalInitialNet += child.initialNature === 'D' ? (child.initialBalance || 0) : -(child.initialBalance || 0);
           totalFinal += child.finalNature === 'D' ? (child.finalBalance || 0) : -(child.finalBalance || 0);
@@ -351,6 +354,62 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
+  const createNewBlankPeriod = (periodInfo: { description: string; startDate: string; endDate: string }) => {
+    const allBase = [...DEFAULT_CHART_OF_ACCOUNTS, ...customAccounts];
+    const blank = allBase.map((acc) => ({
+      periodId: 'new',
+      accountId: String(acc.codeReduced),
+      classification: acc.classification,
+      description: acc.description,
+      codeReduced: acc.codeReduced,
+      statementGroup: acc.statementGroup,
+      accountType: acc.accountType,
+      initialBalance: 0,
+      initialNature: acc.nature,
+      debitAmount: 0,
+      creditAmount: 0,
+      finalBalance: 0,
+      finalNature: acc.nature,
+    }));
+
+    setBalances(blank);
+    setInitialSnapshot(blank.map((b) => ({ ...b })));
+    setHistory([]);
+    setPeriod({
+      id: undefined,
+      description: periodInfo.description,
+      startDate: periodInfo.startDate,
+      endDate: periodInfo.endDate,
+      status: 'OPEN',
+      sourceType: 'MANUAL',
+    });
+  };
+
+  const closeResultAccountsAction = () => {
+    const snapshot = balances.map((b) => ({ ...b }));
+    const closed = AccountingEngine.closeResultAccounts(balances);
+    const recalculated = recalculateTree(closed);
+    setBalances(recalculated);
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+    setHistory((h) => [
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: timeStr,
+        accountCode: 1029,
+        accountName: 'Zeramento de Contas de Resultado (DRE -> PL)',
+        classification: '2-4-08-01',
+        field: 'Zeramento',
+        previousValue: 0,
+        newValue: 0,
+        snapshot,
+      },
+      ...h,
+    ]);
+  };
+
   const distributeExpenseAccount = (sourceCodeReduced: number, percentage: number): ExpenseDistributionResult => {
     const snapshot = balances.map((b) => ({ ...b }));
     const result = ExpenseDistributor.distribute(balances, sourceCodeReduced, percentage);
@@ -453,6 +512,31 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       return recalculateTree(updatedList);
     });
+  };
+
+  const editAccount = async (account: Omit<ChartAccount, 'id' | 'companyId'>) => {
+    await repository.updateAccountInDatabase(account);
+    setBalances((prev) => {
+      const updated = prev.map((b) =>
+        b.codeReduced === account.codeReduced
+          ? {
+              ...b,
+              classification: account.classification,
+              description: account.description,
+              accountType: account.accountType,
+              statementGroup: account.statementGroup,
+              initialNature: account.nature,
+              finalNature: account.nature,
+            }
+          : b
+      );
+      return recalculateTree(updated);
+    });
+  };
+
+  const deleteAccount = async (codeReduced: number) => {
+    await repository.deleteAccountFromDatabase(codeReduced);
+    setBalances((prev) => prev.filter((b) => b.codeReduced !== codeReduced));
   };
 
   const recordHistoryEntry = (
@@ -560,7 +644,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const formatPeriodText = (startDate?: string, endDate?: string): string => {
     const s = startDate || period.startDate;
     const e = endDate || period.endDate;
-    if (!s || !e) return '01/01/2024 a 31/12/2024';
+    if (!s || !e) return '01/01/2026 a 31/12/2026';
 
     const formatSafe = (d: string) => {
       if (d.includes('/')) return d;
@@ -716,7 +800,11 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateBalance,
         recordHistoryEntry,
         addNewAccount,
+        editAccount,
+        deleteAccount,
         syncChartOfAccounts,
+        createNewBlankPeriod,
+        closeResultAccountsAction,
         distributeExpenseAccount,
         togglePeriodClose,
         applyAutoBalance,

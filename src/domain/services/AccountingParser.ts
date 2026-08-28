@@ -23,6 +23,13 @@ export interface ParsedAccountingData {
   balances: AccountingBalance[];
 }
 
+export interface ParsedDREItem {
+  codeReduced?: number;
+  classification?: string;
+  description: string;
+  amount: number;
+}
+
 export class AccountingParser {
   public static parseCurrency(val: any): { amount: number; nature: 'D' | 'C' } {
     if (val === null || val === undefined) return { amount: 0, nature: 'D' };
@@ -60,7 +67,7 @@ export class AccountingParser {
     return { amount, nature };
   }
 
-  private static extractDates(text: string, filenameHint: string = ''): { startDate: string; endDate: string; description: string } {
+  public static extractDates(text: string, filenameHint: string = ''): { startDate: string; endDate: string; description: string } {
     const combined = `${filenameHint} ${text}`;
 
     const rangeMatch = combined.match(/(\d{2})[./\-](\d{2})[./\-](\d{4})\s*(?:a|até|ate|-)\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
@@ -91,17 +98,6 @@ export class AccountingParser {
       };
     }
 
-    const singleMatch = combined.match(/(?:encerrado em|posi[cç][aã]o em|at[eé])\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
-    if (singleMatch) {
-      const [, d, m, y] = singleMatch;
-      const startM = m === '03' ? '01' : (m === '06' ? '04' : (m === '09' ? '07' : '01'));
-      return {
-        startDate: `${y}-${startM}-01`,
-        endDate: `${y}-${m}-${d}`,
-        description: `Exercício 01/${startM}/${y} a ${d}/${m}/${y}`,
-      };
-    }
-
     const yearMatch = combined.match(/(?:^|[^\d])(20\d{2})(?:[^\d]|$)/);
     if (yearMatch) {
       const y = yearMatch[1];
@@ -113,9 +109,9 @@ export class AccountingParser {
     }
 
     return {
-      startDate: '2025-01-01',
-      endDate: '2025-12-31',
-      description: 'Exercício 01/01/2025 a 31/12/2025',
+      startDate: '2024-01-01',
+      endDate: '2024-12-31',
+      description: 'Exercício 01/01/2024 a 31/12/2024',
     };
   }
 
@@ -188,7 +184,6 @@ export class AccountingParser {
         debitAmount = found.deb;
         creditAmount = found.cred;
 
-        // Calcula o saldo final matematicamente respeitando a regra de zeramento
         const calc = AccountingEngine.calculateFinalBalance(
           initialBalance,
           initialNature,
@@ -222,6 +217,128 @@ export class AccountingParser {
       accountant: { name: accountantName, crc },
       period: { description, startDate, endDate },
       balances,
+    };
+  }
+
+  public static parseDREExcel(buffer: ArrayBuffer, fileName: string = ''): {
+    company: { corporateName: string; cnpj: string; nire?: string; nireDate?: string };
+    accountant: { name: string; crc: string };
+    period: { description: string; startDate: string; endDate: string };
+    items: ParsedDREItem[];
+  } {
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rawMatrix: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    const fullText = rawMatrix.map((r) => r.join(' ')).join('\n');
+    const { startDate, endDate, description } = this.extractDates(fullText, fileName);
+
+    let corporateName = 'JC MACHADO DIAS';
+    let cnpj = '24.905.673/0001-59';
+    let nire = '21201532287';
+    let nireDate = '2016-05-31';
+
+    for (const row of rawMatrix) {
+      const rowStr = row.join(' ');
+      if (rowStr.includes('CNPJ')) {
+        const m = rowStr.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
+        if (m) cnpj = m[0];
+      }
+      if (rowStr.includes('NIRE')) {
+        const m = rowStr.match(/NIRE:\s*(\d+)/i);
+        if (m) nire = m[1];
+      }
+    }
+
+    const items: ParsedDREItem[] = [];
+    const valueRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
+
+    for (const row of rawMatrix) {
+      const rowStr = row.join(' ');
+      const codeMatch = rowStr.match(/\[(\d+)\]/) || rowStr.match(/^(\d{3,5})\b/);
+      const classMatch = rowStr.match(/([34]-[0-9-]+)/);
+
+      const codeReduced = codeMatch ? parseInt(codeMatch[1], 10) : undefined;
+      const classification = classMatch ? classMatch[1] : undefined;
+
+      const matches = rowStr.match(valueRegex);
+      if (matches && matches.length > 0) {
+        const parsedVal = this.parseCurrency(matches[matches.length - 1]);
+        if (parsedVal.amount > 0) {
+          items.push({
+            codeReduced,
+            classification,
+            description: row[0] ? String(row[0]).trim() : 'Conta DRE',
+            amount: parsedVal.amount,
+          });
+        }
+      }
+    }
+
+    return {
+      company: { corporateName, cnpj, nire, nireDate },
+      accountant: { name: 'JAMAILA FONSECA LOPES COSTA', crc: '0124650' },
+      period: { description, startDate, endDate },
+      items,
+    };
+  }
+
+  public static parseDREText(rawText: string, fileName: string = ''): {
+    company: { corporateName: string; cnpj: string; nire?: string; nireDate?: string };
+    accountant: { name: string; crc: string };
+    period: { description: string; startDate: string; endDate: string };
+    items: ParsedDREItem[];
+  } {
+    const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const { startDate, endDate, description } = this.extractDates(rawText, fileName);
+
+    let corporateName = 'JC MACHADO DIAS';
+    let cnpj = '24.905.673/0001-59';
+    let nire = '21201532287';
+    let nireDate = '2016-05-31';
+
+    for (const line of rawLines) {
+      if (line.includes('CNPJ:')) {
+        const m = line.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
+        if (m) cnpj = m[0];
+      }
+      if (line.includes('NIRE:')) {
+        const m = line.match(/NIRE:\s*(\d+)/i);
+        if (m) nire = m[1];
+      }
+    }
+
+    const items: ParsedDREItem[] = [];
+    const valueRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      const classMatch = line.match(/([34]-[0-9-]+)/);
+      const codeMatch = line.match(/\|\s*(\d{3,5})\s*\|/) || line.match(/\[(\d+)\]/);
+
+      const classification = classMatch ? classMatch[1] : undefined;
+      const codeReduced = codeMatch ? parseInt(codeMatch[1], 10) : undefined;
+
+      const matches = line.match(valueRegex);
+      if (matches && matches.length > 0) {
+        const parsedVal = this.parseCurrency(matches[matches.length - 1]);
+        if (parsedVal.amount > 0 && (classification || codeReduced)) {
+          items.push({
+            codeReduced,
+            classification,
+            description: line.split('|')[0]?.trim() || 'Conta DRE',
+            amount: parsedVal.amount,
+          });
+        }
+      }
+    }
+
+    return {
+      company: { corporateName, cnpj, nire, nireDate },
+      accountant: { name: 'JAMAILA FONSECA LOPES COSTA', crc: '0124650' },
+      period: { description, startDate, endDate },
+      items,
     };
   }
 

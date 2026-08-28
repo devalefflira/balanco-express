@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAccounting } from '@/domain/context/AccountingContext';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { ExpenseDistributor } from '@/domain/services/ExpenseDistributor';
+import { AccountingAdvisor, AccountingSuggestion } from '@/domain/services/AccountingAdvisor';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { formatCurrency } from '@/lib/formatters';
 import {
   Save,
@@ -23,6 +25,12 @@ import {
   PieChart,
   X,
   Share2,
+  CheckSquare,
+  Bot,
+  Sparkles,
+  HelpCircle,
+  Lightbulb,
+  Check,
 } from 'lucide-react';
 
 export default function LancamentosPage() {
@@ -36,6 +44,7 @@ export default function LancamentosPage() {
     updateBalance,
     recordHistoryEntry,
     syncChartOfAccounts,
+    closeResultAccountsAction,
     distributeExpenseAccount,
     applyAutoBalance,
     undoLastChange,
@@ -48,12 +57,24 @@ export default function LancamentosPage() {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'ATIVO' | 'PASSIVO' | 'RESULTADO' | 'ALL'>('ATIVO');
 
-  // Modal de Distribuição de Despesas
+  const [selectedFocusAccount, setSelectedFocusAccount] = useState<AccountingBalance | null>(null);
+  const [activeSuggestions, setActiveSuggestions] = useState<AccountingSuggestion[]>([]);
+  const [assistantTab, setAssistantTab] = useState<'SUGGESTIONS' | 'GUIDE'>('SUGGESTIONS');
+
   const [isDistributeModalOpen, setIsDistributeModalOpen] = useState(false);
   const [selectedExpenseCode, setSelectedExpenseCode] = useState<number>(1624);
   const [distributePercent, setDistributePercent] = useState<number>(85);
 
   const outlierExpenses = ExpenseDistributor.detectOutlierExpenses(balances);
+
+  useEffect(() => {
+    if (balances.length > 0 && !selectedFocusAccount) {
+      const defaultAccount = balances.find((b) => b.codeReduced === 1211) || balances[0];
+      setSelectedFocusAccount(defaultAccount);
+      const initialSugs = AccountingAdvisor.analyzeChange(defaultAccount, 'creditAmount', defaultAccount.creditAmount || 1000, balances);
+      setActiveSuggestions(initialSugs);
+    }
+  }, [balances, selectedFocusAccount]);
 
   const focusStateRef = useRef<{
     codeReduced: number;
@@ -63,6 +84,13 @@ export default function LancamentosPage() {
   } | null>(null);
 
   const handleFocus = (codeReduced: number, field: string, currentValue: number) => {
+    const target = balances.find((b) => b.codeReduced === codeReduced);
+    if (target) {
+      setSelectedFocusAccount(target);
+      const sugs = AccountingAdvisor.analyzeChange(target, field, currentValue || 1000, balances);
+      setActiveSuggestions(sugs);
+    }
+
     focusStateRef.current = {
       codeReduced,
       field,
@@ -77,6 +105,12 @@ export default function LancamentosPage() {
 
     if (fCode === codeReduced && fField === field && initialValue !== finalValue) {
       recordHistoryEntry(codeReduced, field, initialValue, finalValue, snapshot);
+
+      const targetAcc = balances.find((b) => b.codeReduced === codeReduced);
+      if (targetAcc) {
+        const sugs = AccountingAdvisor.analyzeChange(targetAcc, field, finalValue, balances);
+        setActiveSuggestions(sugs);
+      }
     }
     focusStateRef.current = null;
   };
@@ -84,15 +118,21 @@ export default function LancamentosPage() {
   const handleManualSync = async () => {
     try {
       const added = await syncChartOfAccounts();
-      if (added > 0) {
-        setSyncNotice(`${added} nova(s) conta(s) sincronizada(s) com sucesso!`);
-      } else {
-        setSyncNotice('Todas as contas do Plano de Contas já estão sincronizadas.');
-      }
+      setSyncNotice(
+        added > 0
+          ? `${added} nova(s) conta(s) sincronizada(s) com sucesso!`
+          : 'Todas as contas do Plano de Contas já estão sincronizadas.'
+      );
       setTimeout(() => setSyncNotice(null), 3000);
     } catch (e: any) {
       alert(`Erro ao sincronizar: ${e.message}`);
     }
+  };
+
+  const handleCloseResult = () => {
+    closeResultAccountsAction();
+    setSyncNotice('Contas de Resultado (DRE) zeradas com sucesso contra o Patrimônio Líquido!');
+    setTimeout(() => setSyncNotice(null), 4000);
   };
 
   const handleConfirmDistribution = () => {
@@ -129,7 +169,7 @@ export default function LancamentosPage() {
   return (
     <div className="p-6 space-y-6 max-w-[1700px] mx-auto">
       {/* 1. Barra Superior de Controle do Período */}
-      <div className="bg-white p-5 rounded-2xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white p-5 rounded-2xl border shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
             <Calendar className="w-5 h-5" />
@@ -174,10 +214,18 @@ export default function LancamentosPage() {
           </div>
 
           <button
+            onClick={handleCloseResult}
+            title="Zera as contas analíticas de receita/despesa e transfere o resultado para a conta 2-4-08-01"
+            className="mt-4 px-3.5 py-2 border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs"
+          >
+            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
+            Zerar Resultado (DRE)
+          </button>
+
+          <button
             onClick={handleManualSync}
             disabled={isLoading}
-            title="Sincroniza novas contas criadas no Plano de Contas sem alterar os valores existentes"
-            className="mt-4 px-3.5 py-2 border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm disabled:opacity-50"
+            className="mt-4 px-3.5 py-2 border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             Sincronizar Plano
@@ -194,7 +242,7 @@ export default function LancamentosPage() {
           <button
             onClick={handleSave}
             disabled={isLoading}
-            className={`mt-4 px-5 py-2 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow transition ${
+            className={`mt-4 px-5 py-2 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition ${
               saveSuccess ? 'bg-emerald-600' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
@@ -204,9 +252,132 @@ export default function LancamentosPage() {
         </div>
       </div>
 
-      {/* Alerta de Despesa Concentrada com Ação Rápida */}
+      {/* 2. PAINEL DO COPILOTO CONTÁBIL */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-5 rounded-2xl shadow-md border border-slate-800 space-y-4">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-white/10 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-500/20 text-blue-400 border border-blue-400/30 rounded-xl">
+              <Bot className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold tracking-wide">Assistente de Partidas Dobradas & Fechamento</h3>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                  Online
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                {selectedFocusAccount
+                  ? `Conta em foco: [${selectedFocusAccount.codeReduced}] ${selectedFocusAccount.description} (${selectedFocusAccount.classification})`
+                  : 'Selecione ou edite qualquer campo da tabela para ver a explicação e sugestões de contrapartidas contábeis.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setAssistantTab('SUGGESTIONS')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                assistantTab === 'SUGGESTIONS'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+              Sugestões ({activeSuggestions.length})
+            </button>
+            <button
+              onClick={() => setAssistantTab('GUIDE')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                assistantTab === 'GUIDE'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              Regras do Exercício
+            </button>
+          </div>
+        </div>
+
+        {assistantTab === 'SUGGESTIONS' ? (
+          activeSuggestions.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-in fade-in">
+              {activeSuggestions.map((sug) => (
+                <div key={sug.id} className="bg-white/10 backdrop-blur-md p-3.5 rounded-xl border border-white/15 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-200">{sug.title}</span>
+                    <span className="text-[10px] font-mono bg-blue-500/30 text-blue-100 font-bold px-2 py-0.5 rounded-full">
+                      Contrapartida: {sug.targetClassification}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-200 leading-relaxed">{sug.explanation}</p>
+                  <div className="pt-2 border-t border-white/10 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-300 font-medium">{sug.targetDescription}</span>
+                    {sug.suggestedField && sug.suggestedValue !== undefined && (
+                      <button
+                        onClick={() => {
+                          updateBalance(sug.targetCode, sug.suggestedField!, sug.suggestedValue!);
+                          setActiveSuggestions((prev) => prev.filter((s) => s.id !== sug.id));
+                        }}
+                        className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Lançar Ajuste (+ R$ {formatCurrency(sug.suggestedValue)})
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-center justify-between p-3.5 bg-white/5 rounded-xl border border-white/10 gap-3">
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                <p className="text-xs text-slate-200">
+                  {balanceSheet.isBalanced
+                    ? 'Balanço equilibrado com sucesso! Débitos e Créditos conferem com as normas do CFC/CPC.'
+                    : `Diferença atual entre Ativo e Passivo: R$ ${formatCurrency(balanceSheet.discrepancy.abs().toNumber())}. Você pode ajustar os valores manualmente ou acionar o Auto-Balanceamento.`}
+                </p>
+              </div>
+              {!balanceSheet.isBalanced && (
+                <button
+                  onClick={applyAutoBalance}
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs transition flex items-center gap-1.5 flex-shrink-0"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  Equilibrar Agora
+                </button>
+              )}
+            </div>
+          )
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-200 animate-in fade-in">
+            <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
+              <p className="font-bold text-blue-300">1. Zeramento de Resultado</p>
+              <p className="text-[11px] text-slate-300">
+                Despesas e Receitas encerram o saldo em 0,00 e o lucro líquido é transportado para o PL (2-4-08-01).
+              </p>
+            </div>
+            <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
+              <p className="font-bold text-blue-300">2. Princípio das Partidas Dobradas</p>
+              <p className="text-[11px] text-slate-300">
+                Para cada Débito aplicado no Ativo ou Despesa, deve haver um Crédito equivalente no Passivo ou Receita.
+              </p>
+            </div>
+            <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1">
+              <p className="font-bold text-blue-300">3. Transporte Patrimonial</p>
+              <p className="text-[11px] text-slate-300">
+                Ao finalizar o exercício, os saldos finais de Ativo e Passivo viram o saldo anterior do ano subsequente.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Alerta de Despesa Concentrada */}
       {outlierExpenses.length > 0 && (
-        <div className="p-4 bg-purple-50 border border-purple-200 text-purple-900 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
+        <div className="p-4 bg-purple-50 border border-purple-200 text-purple-900 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-3">
             <PieChart className="w-5 h-5 text-purple-600 flex-shrink-0" />
             <div>
@@ -221,7 +392,7 @@ export default function LancamentosPage() {
               setSelectedExpenseCode(outlierExpenses[0].codeReduced);
               setIsDistributeModalOpen(true);
             }}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow transition flex-shrink-0"
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition flex-shrink-0"
           >
             <Share2 className="w-4 h-4" />
             Distribuir Despesas
@@ -236,9 +407,9 @@ export default function LancamentosPage() {
         </div>
       )}
 
-      {/* 2. Barra de Status de Balanceamento */}
+      {/* Status de Balanceamento */}
       {balanceSheet.isBalanced ? (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl flex items-center justify-between shadow-sm">
+        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl flex items-center justify-between shadow-xs">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
             <div>
@@ -251,7 +422,7 @@ export default function LancamentosPage() {
           </div>
         </div>
       ) : (
-        <div className="p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
+        <div className="p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
             <div>
@@ -267,7 +438,7 @@ export default function LancamentosPage() {
           </div>
           <button
             onClick={applyAutoBalance}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow transition"
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition"
           >
             <Wand2 className="w-4 h-4" />
             Balancear Automaticamente
@@ -275,14 +446,12 @@ export default function LancamentosPage() {
         </div>
       )}
 
-      {/* 3. Abas de Navegação */}
+      {/* Abas */}
       <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
         <button
           onClick={() => setActiveTab('ATIVO')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'ATIVO'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border'
+            activeTab === 'ATIVO' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-gray-600 hover:bg-gray-100 border'
           }`}
         >
           <Wallet className="w-4 h-4" />
@@ -292,9 +461,7 @@ export default function LancamentosPage() {
         <button
           onClick={() => setActiveTab('PASSIVO')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'PASSIVO'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border'
+            activeTab === 'PASSIVO' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-gray-600 hover:bg-gray-100 border'
           }`}
         >
           <Building className="w-4 h-4" />
@@ -304,9 +471,7 @@ export default function LancamentosPage() {
         <button
           onClick={() => setActiveTab('RESULTADO')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'RESULTADO'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border'
+            activeTab === 'RESULTADO' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-gray-600 hover:bg-gray-100 border'
           }`}
         >
           <TrendingUp className="w-4 h-4" />
@@ -316,9 +481,7 @@ export default function LancamentosPage() {
         <button
           onClick={() => setActiveTab('ALL')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'ALL'
-              ? 'bg-slate-900 text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border'
+            activeTab === 'ALL' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white text-gray-600 hover:bg-gray-100 border'
           }`}
         >
           <Layers className="w-4 h-4" />
@@ -326,10 +489,9 @@ export default function LancamentosPage() {
         </button>
       </div>
 
-      {/* 4. Grid Principal: Tabela de Lançamentos + Painel Lateral */}
+      {/* Tabela de Lançamentos com CurrencyInput */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
-        {/* Tabela (3/4) */}
-        <div className="xl:col-span-3 bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col">
+        <div className="xl:col-span-3 bg-white rounded-2xl border shadow-xs overflow-hidden flex flex-col">
           <div className="p-4 border-b flex items-center justify-between bg-gray-50/50">
             <div>
               <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">
@@ -349,21 +511,28 @@ export default function LancamentosPage() {
                   <th className="py-2.5 px-3 w-16">Cód.</th>
                   <th className="py-2.5 px-3 w-28">Classificação</th>
                   <th className="py-2.5 px-3">Descrição da Conta</th>
-                  <th className="py-2.5 px-3 text-right w-32">Saldo Anterior</th>
-                  <th className="py-2.5 px-3 text-right w-36">Débito (R$)</th>
-                  <th className="py-2.5 px-3 text-right w-36">Crédito (R$)</th>
-                  <th className="py-2.5 px-3 text-right w-36">Saldo Atual (R$)</th>
+                  <th className="py-2.5 px-3 text-right w-36">Saldo Anterior</th>
+                  <th className="py-2.5 px-3 text-right w-40">Débito (R$)</th>
+                  <th className="py-2.5 px-3 text-right w-40">Crédito (R$)</th>
+                  <th className="py-2.5 px-3 text-right w-40">Saldo Atual (R$)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-mono">
                 {filteredBalances.map((item) => {
                   const isSynthetic = item.accountType === 'SINTETICA';
+                  const isFocused = selectedFocusAccount?.codeReduced === item.codeReduced;
                   const levelIndent = (item.classification.split('-').length - 1) * 12;
 
                   return (
                     <tr
                       key={item.codeReduced}
-                      className={isSynthetic ? 'bg-gray-50/60 font-bold text-gray-900' : 'hover:bg-blue-50/20 text-gray-800'}
+                      className={`${
+                        isFocused
+                          ? 'bg-blue-50/80 ring-1 ring-inset ring-blue-500'
+                          : isSynthetic
+                          ? 'bg-gray-50/60 font-bold text-gray-900'
+                          : 'hover:bg-blue-50/20 text-gray-800'
+                      }`}
                     >
                       <td className="py-2 px-3 text-gray-500">{item.codeReduced}</td>
                       <td className="py-2 px-3 text-gray-600">{item.classification}</td>
@@ -378,17 +547,12 @@ export default function LancamentosPage() {
                             {formatCurrency(item.initialBalance)} {item.initialNature}
                           </span>
                         ) : (
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={item.initialBalance ?? ''}
+                          <CurrencyInput
+                            value={item.initialBalance}
                             onFocus={() => handleFocus(item.codeReduced, 'initialBalance', Number(item.initialBalance || 0))}
-                            onChange={(e) =>
-                              updateBalance(item.codeReduced, 'initialBalance', parseFloat(e.target.value) || 0)
-                            }
-                            onBlur={(e) => handleBlur(item.codeReduced, 'initialBalance', parseFloat(e.target.value) || 0)}
-                            className="w-full text-right px-2 py-1 border rounded-lg bg-white focus:ring-1 focus:ring-blue-500 text-xs font-mono font-normal"
-                            placeholder="0,00"
+                            onChange={(val) => updateBalance(item.codeReduced, 'initialBalance', val)}
+                            onBlur={(finalVal) => handleBlur(item.codeReduced, 'initialBalance', finalVal)}
+                            className="w-full"
                           />
                         )}
                       </td>
@@ -398,17 +562,12 @@ export default function LancamentosPage() {
                         {isSynthetic ? (
                           <span className="text-gray-500">{formatCurrency(item.debitAmount)}</span>
                         ) : (
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={item.debitAmount ?? ''}
+                          <CurrencyInput
+                            value={item.debitAmount}
                             onFocus={() => handleFocus(item.codeReduced, 'debitAmount', Number(item.debitAmount || 0))}
-                            onChange={(e) =>
-                              updateBalance(item.codeReduced, 'debitAmount', parseFloat(e.target.value) || 0)
-                            }
-                            onBlur={(e) => handleBlur(item.codeReduced, 'debitAmount', parseFloat(e.target.value) || 0)}
-                            className="w-full text-right px-2 py-1 border rounded-lg bg-white focus:ring-1 focus:ring-blue-500 text-xs font-mono font-normal"
-                            placeholder="0,00"
+                            onChange={(val) => updateBalance(item.codeReduced, 'debitAmount', val)}
+                            onBlur={(finalVal) => handleBlur(item.codeReduced, 'debitAmount', finalVal)}
+                            className="w-full"
                           />
                         )}
                       </td>
@@ -418,17 +577,12 @@ export default function LancamentosPage() {
                         {isSynthetic ? (
                           <span className="text-gray-500">{formatCurrency(item.creditAmount)}</span>
                         ) : (
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={item.creditAmount ?? ''}
+                          <CurrencyInput
+                            value={item.creditAmount}
                             onFocus={() => handleFocus(item.codeReduced, 'creditAmount', Number(item.creditAmount || 0))}
-                            onChange={(e) =>
-                              updateBalance(item.codeReduced, 'creditAmount', parseFloat(e.target.value) || 0)
-                            }
-                            onBlur={(e) => handleBlur(item.codeReduced, 'creditAmount', parseFloat(e.target.value) || 0)}
-                            className="w-full text-right px-2 py-1 border rounded-lg bg-white focus:ring-1 focus:ring-blue-500 text-xs font-mono font-normal"
-                            placeholder="0,00"
+                            onChange={(val) => updateBalance(item.codeReduced, 'creditAmount', val)}
+                            onBlur={(finalVal) => handleBlur(item.codeReduced, 'creditAmount', finalVal)}
+                            className="w-full"
                           />
                         )}
                       </td>
@@ -445,8 +599,8 @@ export default function LancamentosPage() {
           </div>
         </div>
 
-        {/* Painel Lateral de Histórico e Contrapartidas */}
-        <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-4 flex flex-col h-[680px]">
+        {/* Histórico */}
+        <div className="bg-white rounded-2xl border shadow-xs p-4 space-y-4 flex flex-col h-[680px]">
           <div className="flex items-center justify-between border-b pb-3">
             <div className="flex items-center gap-2">
               <History className="w-4 h-4 text-blue-600" />
@@ -482,22 +636,18 @@ export default function LancamentosPage() {
                 <History className="w-8 h-8 opacity-30 mb-2" />
                 <p className="font-semibold text-gray-500">Nenhuma alteração recente</p>
                 <p className="text-[10px] text-gray-400 mt-1">
-                  Altere um valor na tabela, distribua despesas ou use o Balanceamento Automático para rastrear as contrapartidas.
+                  Altere um valor na tabela, zere o resultado ou use o Assistente Contábil.
                 </p>
               </div>
             ) : (
               history.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="p-3 border rounded-xl bg-slate-50/80 hover:bg-white text-xs space-y-2 transition border-slate-200"
-                >
+                <div key={entry.id} className="p-3 border rounded-xl bg-slate-50/80 hover:bg-white text-xs space-y-2 transition border-slate-200">
                   <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono border-b pb-1">
                     <span>{entry.timestamp}</span>
                     <span className="font-bold text-gray-600">Conta: {entry.classification}</span>
                   </div>
 
                   {entry.distributionInfo ? (
-                    /* Detalhe da Distribuição de Despesas no Histórico */
                     <div className="space-y-1.5">
                       <div className="p-2 bg-purple-50 border border-purple-200 rounded-lg text-purple-900 text-[11px] font-semibold">
                         <p className="flex items-center gap-1 font-bold text-purple-950">
@@ -505,20 +655,11 @@ export default function LancamentosPage() {
                           Rateio / Distribuição de Despesa
                         </p>
                         <p className="text-[10px] text-purple-800 mt-0.5">
-                          Origem: {entry.distributionInfo.sourceAccount} (Total Distribuído: R$ {formatCurrency(entry.distributionInfo.totalDistributed)})
+                          Origem: {entry.distributionInfo.sourceAccount} (Total: R$ {formatCurrency(entry.distributionInfo.totalDistributed)})
                         </p>
-                      </div>
-                      <div className="space-y-1 pt-1 max-h-32 overflow-y-auto text-[10px] font-mono divide-y divide-gray-100">
-                        {entry.distributionInfo.targets.map((t, idx) => (
-                          <div key={idx} className="flex justify-between py-0.5">
-                            <span className="text-gray-600 truncate max-w-[140px]">{t.name}</span>
-                            <span className="font-bold text-purple-700">+ R$ {formatCurrency(t.amount)}</span>
-                          </div>
-                        ))}
                       </div>
                     </div>
                   ) : entry.counterpart ? (
-                    /* Detalhe do Balanceamento Automático */
                     <div className="space-y-1.5">
                       <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] font-semibold">
                         <p className="flex items-center gap-1 font-bold text-amber-950">
@@ -527,15 +668,8 @@ export default function LancamentosPage() {
                         </p>
                         <p className="text-[10px] text-amber-800 mt-0.5">{entry.counterpart.description}</p>
                       </div>
-                      <div className="flex items-center justify-between text-[11px] pt-1">
-                        <span className="text-gray-500">Contrapartida:</span>
-                        <span className="font-mono font-bold text-emerald-700">
-                          + R$ {formatCurrency(entry.counterpart.amount)} ({entry.counterpart.type})
-                        </span>
-                      </div>
                     </div>
                   ) : (
-                    /* Alteração Manual */
                     <div className="space-y-1">
                       <p className="font-bold text-gray-800 text-[11px] truncate">{entry.accountName}</p>
                       <div className="flex items-center justify-between font-mono text-[11px] text-gray-600 pt-1">
@@ -552,7 +686,6 @@ export default function LancamentosPage() {
         </div>
       </div>
 
-      {/* Modal de Distribuição de Despesas */}
       {isDistributeModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -561,10 +694,7 @@ export default function LancamentosPage() {
                 <Share2 className="w-5 h-5 text-purple-600" />
                 <h3 className="text-sm font-bold text-gray-900">Distribuir Despesa Exorbitante</h3>
               </div>
-              <button
-                onClick={() => setIsDistributeModalOpen(false)}
-                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
-              >
+              <button onClick={() => setIsDistributeModalOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -601,22 +731,6 @@ export default function LancamentosPage() {
                   onChange={(e) => setDistributePercent(parseInt(e.target.value, 10))}
                   className="w-full accent-purple-600 cursor-pointer"
                 />
-                <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-                  <span>Mínimo (10%)</span>
-                  <span>Reter {(100 - distributePercent)}% na conta original</span>
-                  <span>Máximo (95%)</span>
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-xl space-y-1.5 text-[11px] text-purple-900">
-                <p className="font-bold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-purple-600" />
-                  Garantia de Integridade Contábil
-                </p>
-                <p className="text-[10px] text-purple-800 leading-relaxed">
-                  O valor retirado será rateado proporcionalmente entre contas operacionais (Materiais de Consumo, Combustível, Energia, Depreciação, etc.). 
-                  O resultado do exercício (Lucro Líquido) permanecerá inalterado.
-                </p>
               </div>
 
               <div className="pt-4 border-t flex justify-end gap-2">
@@ -630,7 +744,7 @@ export default function LancamentosPage() {
                 <button
                   type="button"
                   onClick={handleConfirmDistribution}
-                  className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-sm transition flex items-center gap-2"
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-xs transition flex items-center gap-2"
                 >
                   <Share2 className="w-4 h-4" />
                   Confirmar Rateio

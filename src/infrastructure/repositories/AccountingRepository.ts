@@ -88,23 +88,13 @@ export class AccountingRepository {
   }
 
   async getCompany(): Promise<any> {
-    const { data, error } = await this.supabase
-      .from('companies')
-      .select('*')
-      .limit(1)
-      .maybeSingle();
-
+    const { data, error } = await this.supabase.from('companies').select('*').limit(1).maybeSingle();
     if (error) console.error('Erro ao buscar empresa:', error);
     return data;
   }
 
   async getAccountant(): Promise<any> {
-    const { data, error } = await this.supabase
-      .from('accountants')
-      .select('*')
-      .limit(1)
-      .maybeSingle();
-
+    const { data, error } = await this.supabase.from('accountants').select('*').limit(1).maybeSingle();
     if (error) console.error('Erro ao buscar contador:', error);
     return data;
   }
@@ -116,6 +106,35 @@ export class AccountingRepository {
       .eq('id', periodId);
 
     if (error) throw new Error(`Erro ao atualizar status do período: ${error.message}`);
+  }
+
+  async updateAccountInDatabase(account: Omit<ChartAccount, 'id' | 'companyId'>): Promise<void> {
+    const { error } = await this.supabase
+      .from('chart_of_accounts')
+      .update({
+        classification: account.classification,
+        description: account.description,
+        account_type: account.accountType,
+        nature: account.nature,
+        statement_group: account.statementGroup,
+        level: account.level,
+      })
+      .eq('code_reduced', account.codeReduced);
+
+    if (error) throw new Error(`Erro ao atualizar conta no banco: ${error.message}`);
+  }
+
+  async deleteAccountFromDatabase(codeReduced: number): Promise<void> {
+    const { data: acc } = await this.supabase
+      .from('chart_of_accounts')
+      .select('id')
+      .eq('code_reduced', codeReduced)
+      .maybeSingle();
+
+    if (acc?.id) {
+      await this.supabase.from('account_balances').delete().eq('account_id', acc.id);
+      await this.supabase.from('chart_of_accounts').delete().eq('id', acc.id);
+    }
   }
 
   async forwardBalancesToNextPeriod(closedPeriodId: string): Promise<{ success: boolean; nextPeriodDescription?: string; accountsForwarded: number }> {
@@ -510,18 +529,10 @@ export class AccountingRepository {
   }
 
   async deletePeriod(periodId: string): Promise<void> {
-    const { error: bErr } = await this.supabase
-      .from('account_balances')
-      .delete()
-      .eq('period_id', periodId);
-
+    const { error: bErr } = await this.supabase.from('account_balances').delete().eq('period_id', periodId);
     if (bErr) throw new Error(`Erro ao deletar saldos: ${bErr.message}`);
 
-    const { error: pErr } = await this.supabase
-      .from('accounting_periods')
-      .delete()
-      .eq('id', periodId);
-
+    const { error: pErr } = await this.supabase.from('accounting_periods').delete().eq('id', periodId);
     if (pErr) throw new Error(`Erro ao deletar período: ${pErr.message}`);
   }
 }
