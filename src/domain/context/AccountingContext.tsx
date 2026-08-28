@@ -67,6 +67,7 @@ export type SavedPeriod = SavedPeriodsSummary & {
   startDate: string;
   endDate: string;
   sourceType: 'MANUAL' | 'IMPORTED';
+  balancesSnapshot?: AccountingBalance[];
 };
 
 export interface AccountingContextData {
@@ -314,7 +315,6 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const distributeExpenseAccount = useCallback((sourceCode: number, percentage: number) => {
     setBalances((prev) => {
       const snapshot = prev.map((b) => ({ ...b }));
-      // Chamada corrigida: o array 'prev' é o primeiro argumento
       const result = ExpenseDistributor.distribute(prev as any, sourceCode as any, percentage as any);
       const updatedList = (result as any)?.updatedBalances || (Array.isArray(result) ? result : prev);
 
@@ -368,32 +368,85 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const saveCurrentBalances = async () => {
     setIsLoading(true);
-    await new Promise((res) => setTimeout(res, 500));
+    // Atualiza o snapshot no savedPeriods ativo
+    setSavedPeriods((prev) =>
+      prev.map((p) => (p.id === period.id ? { ...p, balancesSnapshot: balances } : p))
+    );
+    await new Promise((res) => setTimeout(res, 300));
     setIsLoading(false);
   };
 
   const addNewAccount = async (account: any) => {
     setIsLoading(true);
-    await new Promise((res) => setTimeout(res, 300));
+    await new Promise((res) => setTimeout(res, 200));
     setIsLoading(false);
   };
 
   const editAccount = async (account: any) => {
     setIsLoading(true);
-    await new Promise((res) => setTimeout(res, 300));
+    await new Promise((res) => setTimeout(res, 200));
     setIsLoading(false);
   };
 
   const deleteAccount = async (id: string | number) => {
     setIsLoading(true);
-    await new Promise((res) => setTimeout(res, 300));
+    await new Promise((res) => setTimeout(res, 200));
     setIsLoading(false);
   };
 
-  const importBalancesAndSave = async (fileData: any, periodInfo?: any, companyInfo?: any): Promise<string> => {
+  // Importação e persistência ativa do balancete no estado global
+  const importBalancesAndSave = async (fileBalances: AccountingBalance[], periodInfo?: any, companyInfo?: any): Promise<string> => {
     setIsLoading(true);
     const newId = crypto.randomUUID();
-    await new Promise((res) => setTimeout(res, 500));
+
+    const desc = periodInfo?.description || 'Exercício Importado';
+    const sDate = periodInfo?.startDate || periodInfo?.start_date || '2024-01-01';
+    const eDate = periodInfo?.endDate || periodInfo?.end_date || '2024-12-31';
+
+    if (companyInfo) {
+      setCompany((prev) => ({
+        ...prev,
+        corporateName: companyInfo.corporateName || companyInfo.corporate_name || prev.corporateName,
+        cnpj: companyInfo.cnpj || prev.cnpj,
+      }));
+    }
+
+    const newPeriodState = {
+      id: newId,
+      description: desc,
+      startDate: sDate,
+      endDate: eDate,
+      status: 'OPEN',
+    };
+
+    const newSavedPeriod: SavedPeriod = {
+      id: newId,
+      company_id: 'comp-001',
+      accountant_id: 'acc-001',
+      description: desc,
+      startDate: sDate,
+      endDate: eDate,
+      start_date: sDate,
+      end_date: eDate,
+      status: 'OPEN',
+      sourceType: 'IMPORTED',
+      source_type: 'IMPORTED',
+      is_closed: false,
+      created_at: new Date().toISOString(),
+      balancesSnapshot: fileBalances,
+    };
+
+    // Atualiza os balances globais com o arquivo importado
+    const importedBalancesWithPeriod = fileBalances.map((b) => ({
+      ...b,
+      periodId: newId,
+    }));
+
+    setPeriod(newPeriodState);
+    setBalances(importedBalancesWithPeriod);
+    setSavedPeriods((prev) => [newSavedPeriod, ...prev]);
+    setHistory([]);
+
     setIsLoading(false);
     return newId;
   };
@@ -451,8 +504,12 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         endDate: found.endDate || found.end_date,
         status: found.status,
       });
+
+      if (found.balancesSnapshot && found.balancesSnapshot.length > 0) {
+        setBalances(found.balancesSnapshot);
+      }
     }
-    await new Promise((res) => setTimeout(res, 300));
+    await new Promise((res) => setTimeout(res, 200));
     setIsLoading(false);
   };
 

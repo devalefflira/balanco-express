@@ -1,7 +1,12 @@
+import * as XLSX from 'xlsx';
 import { DEFAULT_CHART_OF_ACCOUNTS } from '@/domain/entities/DefaultChartAccounts';
 import { AccountingBalance } from '@/domain/entities/AccountingBalance';
 import { AccountingEngine } from './AccountingEngine';
-import * as XLSX from 'xlsx';
+
+export interface SheetInfo {
+  name: string;
+  rowCount: number;
+}
 
 export interface ParsedAccountingData {
   company: {
@@ -21,6 +26,8 @@ export interface ParsedAccountingData {
     endDate: string;
   };
   balances: AccountingBalance[];
+  recognizedCount: number;
+  availableSheets?: SheetInfo[];
 }
 
 export interface ParsedDREItem {
@@ -32,13 +39,13 @@ export interface ParsedDREItem {
 
 export class AccountingParser {
   public static parseCurrency(val: any): { amount: number; nature: 'D' | 'C' } {
-    if (val === null || val === undefined) return { amount: 0, nature: 'D' };
+    if (val === null || val === undefined || val === '') return { amount: 0, nature: 'D' };
 
     if (typeof val === 'number') {
       return { amount: Math.abs(val), nature: val < 0 ? 'C' : 'D' };
     }
 
-    let clean = String(val).trim().replace(/[*()=]/g, '');
+    let clean = String(val).trim().replace(/[*()=R$\s]/g, '');
     let nature: 'D' | 'C' = 'D';
 
     const upper = clean.toUpperCase();
@@ -54,21 +61,31 @@ export class AccountingParser {
 
     if (clean.includes(',')) {
       clean = clean.replace(/\./g, '').replace(',', '.');
-    } else if ((clean.match(/\./g) || []).length > 0) {
+    } else if ((clean.match(/\./g) || []).length > 1) {
       const parts = clean.split('.');
-      if (parts.length > 1) {
-        const decimals = parts.pop();
-        const integerPart = parts.join('');
-        clean = `${integerPart}.${decimals}`;
-      }
+      const decimals = parts.pop();
+      const integerPart = parts.join('');
+      clean = `${integerPart}.${decimals}`;
     }
 
     const amount = Math.abs(parseFloat(clean)) || 0;
     return { amount, nature };
   }
 
-  public static extractDates(text: string, filenameHint: string = ''): { startDate: string; endDate: string; description: string } {
-    const combined = `${filenameHint} ${text}`;
+  public static inspectExcelSheets(buffer: ArrayBuffer): SheetInfo[] {
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    return workbook.SheetNames.map((name) => {
+      const sheet = workbook.Sheets[name];
+      const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      return {
+        name,
+        rowCount: data.length,
+      };
+    });
+  }
+
+  public static extractDates(text: string, filenameHint: string = '', sheetNameHint: string = ''): { startDate: string; endDate: string; description: string } {
+    const combined = `${filenameHint} ${sheetNameHint} ${text}`;
 
     const rangeMatch = combined.match(/(\d{2})[./\-](\d{2})[./\-](\d{4})\s*(?:a|até|ate|-)\s*(\d{2})[./\-](\d{2})[./\-](\d{4})/i);
     if (rangeMatch) {
@@ -76,7 +93,7 @@ export class AccountingParser {
       return {
         startDate: `${y1}-${m1}-${d1}`,
         endDate: `${y2}-${m2}-${d2}`,
-        description: `Exercício ${d1}/${m1}/${y1} a ${d2}/${m2}/${y2}`,
+        description: `Exercício de ${d1}/${m1}/${y1} a ${d2}/${m2}/${y2}`,
       };
     }
 
@@ -94,7 +111,7 @@ export class AccountingParser {
       return {
         startDate: q.start,
         endDate: q.end,
-        description: `${quarter}º Trimestre 01/01/${year} a ${q.dEnd}/${q.mEnd}/${year}`,
+        description: `${quarter}º Trimestre de 01/01/${year} a ${q.dEnd}/${q.mEnd}/${year}`,
       };
     }
 
@@ -104,24 +121,30 @@ export class AccountingParser {
       return {
         startDate: `${y}-01-01`,
         endDate: `${y}-12-31`,
-        description: `Exercício 01/01/${y} a 31/12/${y}`,
+        description: `Exercício de 01/01/${y} a 31/12/${y}`,
       };
     }
 
     return {
       startDate: '2024-01-01',
       endDate: '2024-12-31',
-      description: 'Exercício 01/01/2024 a 31/12/2024',
+      description: 'Exercício de 01/01/2024 a 31/12/2024',
     };
   }
 
-  public static parseExcelBuffer(buffer: ArrayBuffer, fileName: string = ''): ParsedAccountingData {
+  public static parseExcelBuffer(buffer: ArrayBuffer, fileName: string = '', targetSheetName?: string): ParsedAccountingData {
     const workbook = XLSX.read(buffer, { type: 'array' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
+    const sheetNames = workbook.SheetNames;
+    const selectedSheet = targetSheetName && sheetNames.includes(targetSheetName) ? targetSheetName : sheetNames[0];
+    const sheet = workbook.Sheets[selectedSheet];
     const rawMatrix: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-    let corporateName = 'JC MACHADO DIAS';
+    const availableSheets: SheetInfo[] = sheetNames.map((name) => ({
+      name,
+      rowCount: (XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1 }) as any[][]).length,
+    }));
+
+    let corporateName = 'JC MACHADO DIAS LTDA';
     let cnpj = '24.905.673/0001-59';
     let nire = '21201532287';
     let nireDate = '2016-05-31';
@@ -129,7 +152,7 @@ export class AccountingParser {
     let crc = '0124650';
 
     const fullText = rawMatrix.map((row) => row.join(' ')).join('\n');
-    const { startDate, endDate, description } = this.extractDates(fullText, fileName);
+    const { startDate, endDate, description } = this.extractDates(fullText, fileName, selectedSheet);
 
     for (const row of rawMatrix) {
       const rowStr = row.join(' ');
@@ -143,20 +166,64 @@ export class AccountingParser {
       }
     }
 
+    // Localiza linha de cabeçalho
+    let headerIdx = -1;
+    let colCode = -1;
+    let colInit = -1;
+    let colDeb = -1;
+    let colCred = -1;
+    let colFinal = -1;
+
+    for (let i = 0; i < Math.min(rawMatrix.length, 10); i++) {
+      const rowLower = rawMatrix[i].map((c) => String(c).toLowerCase().trim());
+      const hasCode = rowLower.some((c) => c.includes('cód') || c.includes('cod') || c.includes('conta'));
+      const hasDeb = rowLower.some((c) => c.includes('débito') || c.includes('debito'));
+      const hasCred = rowLower.some((c) => c.includes('crédito') || c.includes('credito'));
+
+      if (hasCode && (hasDeb || hasCred)) {
+        headerIdx = i;
+        rowLower.forEach((col, cIdx) => {
+          if (col.includes('cód') || col.includes('cod')) colCode = cIdx;
+          if (col.includes('saldo anterior') || col.includes('anterior')) colInit = cIdx;
+          if (col.includes('débito') || col.includes('debito')) colDeb = cIdx;
+          if (col.includes('crédito') || col.includes('credito')) colCred = cIdx;
+          if (col.includes('saldo atual') || col.includes('atual') || col.includes('final')) colFinal = cIdx;
+        });
+        break;
+      }
+    }
+
     const balanceteMap = new Map<number, { initial: number; initialNat: 'D' | 'C'; deb: number; cred: number; final: number; finalNat: 'D' | 'C' }>();
     const valueCurrencyRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
 
-    for (const row of rawMatrix) {
+    const dataRows = headerIdx !== -1 ? rawMatrix.slice(headerIdx + 1) : rawMatrix;
+
+    for (const row of dataRows) {
+      if (!row || row.length === 0) continue;
       const rowStr = row.join(' ');
-      const codeMatch = rowStr.match(/\[(\d+)\]/);
-      if (codeMatch) {
-        const code = parseInt(codeMatch[1], 10);
-        const numbers = rowStr.match(valueCurrencyRegex);
-        if (numbers && numbers.length >= 4) {
-          const init = this.parseCurrency(numbers[0]);
-          const deb = this.parseCurrency(numbers[1]);
-          const cred = this.parseCurrency(numbers[2]);
-          const fin = this.parseCurrency(numbers[3]);
+
+      let code: number | null = null;
+
+      // 1. Extração por coluna mapeada
+      if (colCode !== -1 && row[colCode] !== undefined && row[colCode] !== '') {
+        const parsed = parseInt(String(row[colCode]).replace(/\D/g, ''), 10);
+        if (!isNaN(parsed) && parsed > 0) code = parsed;
+      }
+
+      // 2. Fallback por regex [code] ou início numérico
+      if (code === null) {
+        const codeMatch = rowStr.match(/\[(\d+)\]/) || rowStr.match(/^(\d{1,5})\b/);
+        if (codeMatch) code = parseInt(codeMatch[1], 10);
+      }
+
+      if (code !== null) {
+        // Se temos colunas mapeadas por cabeçalho
+        if (colDeb !== -1 && colCred !== -1) {
+          const init = colInit !== -1 ? this.parseCurrency(row[colInit]) : { amount: 0, nature: 'D' as const };
+          const deb = this.parseCurrency(row[colDeb]);
+          const cred = this.parseCurrency(row[colCred]);
+          const fin = colFinal !== -1 ? this.parseCurrency(row[colFinal]) : { amount: 0, nature: 'D' as const };
+
           balanceteMap.set(code, {
             initial: init.amount,
             initialNat: init.nature,
@@ -165,9 +232,26 @@ export class AccountingParser {
             final: fin.amount,
             finalNat: fin.nature,
           });
+        } else {
+          // Fallback por extração de valores em lote na linha
+          const numbers = rowStr.match(valueCurrencyRegex);
+          if (numbers && numbers.length >= 2) {
+            const deb = this.parseCurrency(numbers[numbers.length - 2]);
+            const cred = this.parseCurrency(numbers[numbers.length - 1]);
+            balanceteMap.set(code, {
+              initial: 0,
+              initialNat: 'D',
+              deb: deb.amount,
+              cred: cred.amount,
+              final: 0,
+              finalNat: 'D',
+            });
+          }
         }
       }
     }
+
+    let recognizedCount = 0;
 
     const balances: AccountingBalance[] = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
       let initialBalance = 0;
@@ -179,6 +263,7 @@ export class AccountingParser {
 
       const found = balanceteMap.get(acc.codeReduced);
       if (found) {
+        recognizedCount++;
         initialBalance = found.initial;
         initialNature = found.initialNat;
         debitAmount = found.deb;
@@ -191,11 +276,12 @@ export class AccountingParser {
           creditAmount,
           acc.nature
         );
-        finalBalance = calc.balance;
-        finalNature = calc.nature;
+        finalBalance = found.final > 0 ? found.final : calc.balance;
+        finalNature = found.finalNat || calc.nature;
       }
 
       return {
+        id: crypto.randomUUID(),
         periodId: 'imported-temp',
         accountId: String(acc.codeReduced),
         classification: acc.classification,
@@ -217,6 +303,8 @@ export class AccountingParser {
       accountant: { name: accountantName, crc },
       period: { description, startDate, endDate },
       balances,
+      recognizedCount,
+      availableSheets,
     };
   }
 
@@ -234,7 +322,7 @@ export class AccountingParser {
     const fullText = rawMatrix.map((r) => r.join(' ')).join('\n');
     const { startDate, endDate, description } = this.extractDates(fullText, fileName);
 
-    let corporateName = 'JC MACHADO DIAS';
+    let corporateName = 'JC MACHADO DIAS LTDA';
     let cnpj = '24.905.673/0001-59';
     let nire = '21201532287';
     let nireDate = '2016-05-31';
@@ -284,68 +372,10 @@ export class AccountingParser {
     };
   }
 
-  public static parseDREText(rawText: string, fileName: string = ''): {
-    company: { corporateName: string; cnpj: string; nire?: string; nireDate?: string };
-    accountant: { name: string; crc: string };
-    period: { description: string; startDate: string; endDate: string };
-    items: ParsedDREItem[];
-  } {
-    const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const { startDate, endDate, description } = this.extractDates(rawText, fileName);
-
-    let corporateName = 'JC MACHADO DIAS';
-    let cnpj = '24.905.673/0001-59';
-    let nire = '21201532287';
-    let nireDate = '2016-05-31';
-
-    for (const line of rawLines) {
-      if (line.includes('CNPJ:')) {
-        const m = line.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
-        if (m) cnpj = m[0];
-      }
-      if (line.includes('NIRE:')) {
-        const m = line.match(/NIRE:\s*(\d+)/i);
-        if (m) nire = m[1];
-      }
-    }
-
-    const items: ParsedDREItem[] = [];
-    const valueRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
-
-    for (let i = 0; i < rawLines.length; i++) {
-      const line = rawLines[i];
-      const classMatch = line.match(/([34]-[0-9-]+)/);
-      const codeMatch = line.match(/\|\s*(\d{3,5})\s*\|/) || line.match(/\[(\d+)\]/);
-
-      const classification = classMatch ? classMatch[1] : undefined;
-      const codeReduced = codeMatch ? parseInt(codeMatch[1], 10) : undefined;
-
-      const matches = line.match(valueRegex);
-      if (matches && matches.length > 0) {
-        const parsedVal = this.parseCurrency(matches[matches.length - 1]);
-        if (parsedVal.amount > 0 && (classification || codeReduced)) {
-          items.push({
-            codeReduced,
-            classification,
-            description: line.split('|')[0]?.trim() || 'Conta DRE',
-            amount: parsedVal.amount,
-          });
-        }
-      }
-    }
-
-    return {
-      company: { corporateName, cnpj, nire, nireDate },
-      accountant: { name: 'JAMAILA FONSECA LOPES COSTA', crc: '0124650' },
-      period: { description, startDate, endDate },
-      items,
-    };
-  }
-
   public static parseRawText(rawText: string, fileName: string = ''): ParsedAccountingData {
     const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
-    let corporateName = 'JC MACHADO DIAS';
+    let corporateName = 'JC MACHADO DIAS LTDA';
     let cnpj = '24.905.673/0001-59';
     let nire = '21201532287';
     let nireDate = '2016-05-31';
@@ -392,6 +422,8 @@ export class AccountingParser {
       }
     }
 
+    let recognizedCount = 0;
+
     const balances: AccountingBalance[] = DEFAULT_CHART_OF_ACCOUNTS.map((acc) => {
       let initialBalance = 0;
       let initialNature: 'D' | 'C' = acc.nature;
@@ -402,6 +434,7 @@ export class AccountingParser {
 
       const found = balanceteMap.get(acc.codeReduced);
       if (found) {
+        recognizedCount++;
         initialBalance = found.initial;
         initialNature = found.initialNat;
         debitAmount = found.deb;
@@ -419,6 +452,7 @@ export class AccountingParser {
       }
 
       return {
+        id: crypto.randomUUID(),
         periodId: 'imported-temp',
         accountId: String(acc.codeReduced),
         classification: acc.classification,
@@ -440,6 +474,65 @@ export class AccountingParser {
       accountant: { name: accountantName, crc },
       period: { description, startDate, endDate },
       balances,
+      recognizedCount,
+    };
+  }
+
+  public static parseDREText(rawText: string, fileName: string = ''): {
+    company: { corporateName: string; cnpj: string; nire?: string; nireDate?: string };
+    accountant: { name: string; crc: string };
+    period: { description: string; startDate: string; endDate: string };
+    items: ParsedDREItem[];
+  } {
+    const rawLines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const { startDate, endDate, description } = this.extractDates(rawText, fileName);
+
+    let corporateName = 'JC MACHADO DIAS LTDA';
+    let cnpj = '24.905.673/0001-59';
+    let nire = '21201532287';
+    let nireDate = '2016-05-31';
+
+    for (const line of rawLines) {
+      if (line.includes('CNPJ:')) {
+        const m = line.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14}/);
+        if (m) cnpj = m[0];
+      }
+      if (line.includes('NIRE:')) {
+        const m = line.match(/NIRE:\s*(\d+)/i);
+        if (m) nire = m[1];
+      }
+    }
+
+    const items: ParsedDREItem[] = [];
+    const valueRegex = /[*]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})[DCdc]?/g;
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      const classMatch = line.match(/([34]-[0-9-]+)/);
+      const codeMatch = line.match(/\|\s*(\d{3,5})\s*\|/) || line.match(/\[(\d+)\]/);
+
+      const classification = classMatch ? classMatch[1] : undefined;
+      const codeReduced = codeMatch ? parseInt(codeMatch[1], 10) : undefined;
+
+      const matches = line.match(valueRegex);
+      if (matches && matches.length > 0) {
+        const parsedVal = this.parseCurrency(matches[matches.length - 1]);
+        if (parsedVal.amount > 0 && (classification || codeReduced)) {
+          items.push({
+            codeReduced,
+            classification,
+            description: line.split('|')[0]?.trim() || 'Conta DRE',
+            amount: parsedVal.amount,
+          });
+        }
+      }
+    }
+
+    return {
+      company: { corporateName, cnpj, nire, nireDate },
+      accountant: { name: 'JAMAILA FONSECA LOPES COSTA', crc: '0124650' },
+      period: { description, startDate, endDate },
+      items,
     };
   }
 }
