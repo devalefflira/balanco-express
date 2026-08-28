@@ -78,7 +78,6 @@ export class AccountingEngine {
       const cred = new Decimal(item.creditAmount || 0);
       const finalBal = new Decimal(item.finalBalance || 0);
 
-      // Movimentação líquida por grupo
       const netCreditMov = cred.minus(deb).isPositive() ? cred.minus(deb) : finalBal;
       const netDebitMov = deb.minus(cred).isPositive() ? deb.minus(cred) : finalBal;
 
@@ -131,7 +130,6 @@ export class AccountingEngine {
       if (item.classification.startsWith('1-1')) {
         currentAssets = item.finalNature === 'C' ? currentAssets.minus(val) : currentAssets.plus(val);
       } else if (item.classification.startsWith('1-2')) {
-        // Se for conta de depreciação acumulada com natureza C, deduz do Imobilizado
         if (item.classification.startsWith('1-2-04') || item.finalNature === 'C') {
           nonCurrentAssets = nonCurrentAssets.minus(val);
         } else {
@@ -142,8 +140,10 @@ export class AccountingEngine {
       } else if (item.classification.startsWith('2-2')) {
         nonCurrentLiabilities = item.finalNature === 'D' ? nonCurrentLiabilities.minus(val) : nonCurrentLiabilities.plus(val);
       } else if (item.classification.startsWith('2-4')) {
-        // Ignora a conta 2-4-08-01 (1029) se a DRE já estiver com resultado apurado aberto
-        if (item.codeReduced !== 1029 && !item.classification.startsWith('2-4-08-01')) {
+        if (item.codeReduced === 1029 || item.classification.startsWith('2-4-08-01')) {
+          const priorLucros = new Decimal(item.initialBalance || 0);
+          equityAccountsTotal = item.initialNature === 'D' ? equityAccountsTotal.minus(priorLucros) : equityAccountsTotal.plus(priorLucros);
+        } else {
           equityAccountsTotal = item.finalNature === 'D' ? equityAccountsTotal.minus(val) : equityAccountsTotal.plus(val);
         }
       }
@@ -151,14 +151,7 @@ export class AccountingEngine {
 
     const totalAssets = currentAssets.plus(nonCurrentAssets);
     const totalLiabilities = currentLiabilities.plus(nonCurrentLiabilities);
-
-    // O Patrimônio Líquido consolida o Capital/Reservas + o Lucro apurado dinamicamente da DRE
-    const recordedPeriodResult = analytical.find(b => b.codeReduced === 1029 || b.classification.startsWith('2-4-08-01'));
-    const isDREAlreadyClosed = recordedPeriodResult && (recordedPeriodResult.finalBalance || 0) > 0;
-
-    const totalEquity = isDREAlreadyClosed 
-      ? equityAccountsTotal.plus(new Decimal(recordedPeriodResult?.finalBalance || 0))
-      : equityAccountsTotal.plus(dreResult.netIncome);
+    const totalEquity = equityAccountsTotal.plus(dreResult.netIncome);
 
     const totalLiabilitiesAndEquity = totalLiabilities.plus(totalEquity);
     const discrepancy = totalAssets.minus(totalLiabilitiesAndEquity);
@@ -178,9 +171,6 @@ export class AccountingEngine {
     };
   }
 
-  /**
-   * Realiza o Zeramento de Resultado: transfere as receitas e despesas para a conta de resultado
-   */
   public static closeResultAccounts(balances: AccountingBalance[]): AccountingBalance[] {
     const list = balances.map(b => ({ ...b }));
     const dreResult = this.calculateDRE(list);
