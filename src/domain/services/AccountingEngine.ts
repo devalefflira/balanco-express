@@ -38,29 +38,21 @@ export class AccountingEngine {
     const deb = new Decimal(debit || 0);
     const cred = new Decimal(credit || 0);
 
-    let netValue = new Decimal(0);
-
-    if (initialNature === 'D') {
-      netValue = initial.plus(deb).minus(cred);
-    } else {
-      netValue = initial.plus(cred).minus(deb);
-    }
-
-    if (netValue.abs().lessThan(0.0001)) {
-      return { balance: 0, nature: accountNature };
-    }
-
-    if (accountNature === 'D') {
-      if (netValue.isNegative()) {
-        return { balance: netValue.abs().toNumber(), nature: 'C' };
-      }
-      return { balance: netValue.toNumber(), nature: 'D' };
-    } else {
+    // Se a conta for de natureza Credora (Passivo, PL, Receita, Depreciação), Crédito soma e Débito diminui
+    if (accountNature === 'C') {
+      const netValue = initial.plus(cred).minus(deb);
       if (netValue.isNegative()) {
         return { balance: netValue.abs().toNumber(), nature: 'D' };
       }
       return { balance: netValue.toNumber(), nature: 'C' };
     }
+
+    // Se a conta for de natureza Devedora (Ativo, Despesa, Custo), Débito soma e Crédito diminui
+    const netValue = initial.plus(deb).minus(cred);
+    if (netValue.isNegative()) {
+      return { balance: netValue.abs().toNumber(), nature: 'C' };
+    }
+    return { balance: netValue.toNumber(), nature: 'D' };
   }
 
   public static calculateDRE(balances: AccountingBalance[]): DREResult {
