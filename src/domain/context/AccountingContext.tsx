@@ -378,19 +378,73 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const addNewAccount = async (account: any) => {
     setIsLoading(true);
-    await new Promise((res) => setTimeout(res, 200));
+    setBalances((prev) => {
+      const code = Number(account.codeReduced);
+      if (prev.some((b) => b.codeReduced === code)) {
+        return prev;
+      }
+
+      const newBal: AccountingBalance = {
+        id: crypto.randomUUID(),
+        periodId: period.id || 'current-period',
+        accountId: String(code),
+        codeReduced: code,
+        classification: account.classification,
+        description: account.description,
+        accountType: account.accountType,
+        statementGroup: account.statementGroup,
+        initialBalance: 0,
+        initialNature: account.nature || 'D',
+        debitAmount: 0,
+        creditAmount: 0,
+        finalBalance: 0,
+        finalNature: account.nature || 'D',
+      };
+
+      return [...prev, newBal];
+    });
     setIsLoading(false);
   };
 
   const editAccount = async (account: any) => {
     setIsLoading(true);
-    await new Promise((res) => setTimeout(res, 200));
+    setBalances((prev) => {
+      const code = Number(account.codeReduced);
+      const list = [...prev];
+      const idx = list.findIndex((b) => b.codeReduced === code);
+      if (idx === -1) return prev;
+
+      const item = { ...list[idx] };
+      item.classification = account.classification || item.classification;
+      item.description = account.description || item.description;
+      item.accountType = account.accountType || item.accountType;
+      item.statementGroup = account.statementGroup || item.statementGroup;
+
+      const newNature: 'D' | 'C' = account.nature || item.finalNature || 'D';
+      item.initialNature = newNature;
+
+      // Recalcula o saldo final aplicando a nova natureza (Crédito/Débito)
+      const calc = AccountingEngine.calculateFinalBalance(
+        item.initialBalance || 0,
+        newNature,
+        item.debitAmount || 0,
+        item.creditAmount || 0,
+        newNature
+      );
+
+      item.finalBalance = calc.balance;
+      item.finalNature = calc.nature;
+
+      list[idx] = item;
+      return list;
+    });
     setIsLoading(false);
   };
 
   const deleteAccount = async (id: string | number) => {
     setIsLoading(true);
-    await new Promise((res) => setTimeout(res, 200));
+    const code = Number(id);
+    setBalances((prev) => prev.filter((b) => b.codeReduced !== code));
     setIsLoading(false);
   };
 
